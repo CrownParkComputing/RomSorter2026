@@ -1,7 +1,0 @@
-#Sun May 24 08:05:55 BST 2026
-base.0=/home/jon/nscb_rust/android/app/build/intermediates/dex/release/mergeDexRelease/classes.dex
-base.1=/home/jon/nscb_rust/android/app/build/intermediates/dex/release/mergeDexRelease/classes2.dex
-path.0=classes.dex
-path.1=classes2.dex
-renamed.0=classes.dex
-renamed.1=classes2.dex
