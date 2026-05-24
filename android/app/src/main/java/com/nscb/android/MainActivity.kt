@@ -11,6 +11,7 @@ import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
@@ -31,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -45,6 +47,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -301,6 +305,121 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     var showPermissionWizard by remember { mutableStateOf(false) }
     val titleDbCacheDir = remember { File(context.cacheDir, "titledb").absolutePath }
 
+    fun libraryCacheFile() = File(context.filesDir, "library_meta_cache.json")
+
+    fun loadLibraryCache(): Map<String, JSONObject> {
+        val file = libraryCacheFile()
+        if (!file.exists()) return emptyMap()
+        return try {
+            val obj = JSONObject(file.readText())
+            val entries = obj.optJSONObject("entries") ?: return emptyMap()
+            val map = mutableMapOf<String, JSONObject>()
+            for (key in entries.keys()) map[key] = entries.getJSONObject(key)
+            map
+        } catch (_: Exception) { emptyMap() }
+    }
+
+    val libraryCache = remember {
+        val map = mutableMapOf<String, JSONObject>()
+        map.putAll(loadLibraryCache())
+        map
+    }
+
+    fun saveLibraryCache() {
+        try {
+            val entries = JSONObject()
+            for ((k, v) in libraryCache) entries.put(k, v)
+            libraryCacheFile().writeText(JSONObject().put("version", 1).put("entries", entries).toString())
+        } catch (_: Exception) { }
+    }
+
+    fun parseLibraryStatusJson(raw: String, base: LibraryFile): LibraryFile {
+        return try {
+            val json = JSONObject(raw)
+            val titles = json.getJSONArray("titles")
+            if (titles.length() == 0) {
+                base.copy(titleSummary = "No title metadata found", versionStatus = "unknown")
+            } else {
+                val names = mutableListOf<String>()
+                val versions = mutableListOf<String>()
+                var imageUrl: String? = null
+                val details = mutableListOf<LibraryTitleDetail>()
+                var aggregateStatus = "current"
+                for (i in 0 until titles.length()) {
+                    val item = titles.getJSONObject(i)
+                    val titleId = item.getString("title_id")
+                    val name = item.optString("title_name", "Unknown")
+                    val localVersion = item.getLong("local_version")
+                    val latestVersion = if (item.isNull("latest_version")) null else item.getLong("latest_version")
+                    val releaseDate = if (item.isNull("release_date")) null else item.getString("release_date")
+                    val publisher = if (item.isNull("publisher")) null else item.getString("publisher")
+                    val description = if (item.isNull("description")) null else item.getString("description")
+                    val detailImageUrl = if (item.isNull("image_url")) null else item.getString("image_url")
+                    val screenshotUrls = mutableListOf<String>()
+                    if (!item.isNull("screenshot_urls")) {
+                        val shots = item.getJSONArray("screenshot_urls")
+                        for (j in 0 until shots.length()) screenshotUrls.add(shots.getString(j))
+                    }
+                    val languages = mutableListOf<String>()
+                    if (!item.isNull("languages")) {
+                        val langs = item.getJSONArray("languages")
+                        for (j in 0 until langs.length()) languages.add(langs.getString(j))
+                    }
+                    if (imageUrl == null && !item.isNull("image_url")) imageUrl = item.getString("image_url")
+                    val status = item.getString("status")
+                    names.add("$name [$titleId]")
+                    versions.add("local $localVersion" + if (latestVersion != null) " / latest $latestVersion" else " / latest unknown")
+                    details.add(
+                        LibraryTitleDetail(
+                            titleId = titleId, titleName = name, localVersion = localVersion,
+                            latestVersion = latestVersion, releaseDate = releaseDate,
+                            publisher = publisher, languages = languages, description = description,
+                            imageUrl = detailImageUrl, screenshotUrls = screenshotUrls, status = status
+                        )
+                    )
+                    aggregateStatus = when {
+                        status == "outdated" -> "outdated"
+                        aggregateStatus != "outdated" && status == "unknown" -> "unknown"
+                        else -> aggregateStatus
+                    }
+                }
+                base.copy(
+                    titleSummary = names.take(3).joinToString("\n"),
+                    versionSummary = versions.take(3).joinToString("\n"),
+                    versionStatus = aggregateStatus,
+                    imageUrl = imageUrl,
+                    details = details
+                )
+            }
+        } catch (_: Exception) {
+            base.copy(titleSummary = raw.take(200), versionStatus = "error")
+        }
+    }
+
+    fun buildLibraryFileFromCache(base: LibraryFile): LibraryFile? {
+        val entry = libraryCache[base.path] ?: return null
+        if (entry.optLong("size") != base.size || entry.optLong("modified") != base.modified) return null
+        if (entry.optBoolean("hasError", false)) {
+            return base.copy(titleSummary = entry.optString("titleSummary", "Cache error"), versionStatus = "error")
+        }
+        val rawJson = entry.optString("rawJson", "")
+        if (rawJson.isBlank()) return null
+        return parseLibraryStatusJson(rawJson, base)
+    }
+
+    fun putLibraryCacheEntry(path: String, size: Long, modified: Long, raw: String?, hasError: Boolean = false, titleSummary: String = "") {
+        val entry = JSONObject()
+        entry.put("size", size)
+        entry.put("modified", modified)
+        if (hasError) {
+            entry.put("hasError", true)
+            entry.put("titleSummary", titleSummary)
+        } else if (raw != null) {
+            entry.put("rawJson", raw)
+        }
+        libraryCache[path] = entry
+    }
+
     fun appendLog(line: String) {
         Log.i(NSCB_LOG_TAG, line)
         val timestamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
@@ -308,6 +427,15 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
             "[$timestamp] $line"
         } else {
             output + "\n[$timestamp] $line"
+        }
+    }
+
+    fun flushRustLogs() {
+        val logs = NscbBridge.getLogs()
+        if (logs.isNotBlank()) {
+            for (ln in logs.lineSequence()) {
+                if (ln.isNotBlank()) appendLog(ln)
+            }
         }
     }
 
@@ -332,13 +460,13 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     }
 
     fun permissionWizardReady(): Boolean {
-        // Both URIs must be set. For USB/SD drives that aren't mounted at startup,
-        // we treat a saved URI as "ready" — the drive may mount after app start.
-        return viewModel.lastScanUri.isNotBlank() && viewModel.outputFolderUri.isNotBlank()
+        return viewModel.lastScanUri.isNotBlank() || viewModel.lastScanPath.isNotBlank()
     }
 
     fun refreshPermissionWizardState() {
-        showPermissionWizard = true
+        if (!permissionWizardReady()) {
+            showPermissionWizard = true
+        }
     }
 
     fun extForMergeType(type: String): String = if (type.equals("xci", true)) "xci" else "nsp"
@@ -372,17 +500,21 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
         val dirRoot = storageRootForPath(dirPath)
         val outputRoot = storageRootForPath(viewModel.outputDirectory)
         val inputRoot = storageRootForPath(viewModel.lastScanPath)
+        // Always prefer internal app-private storage to avoid scoped-storage symlink kills by vold
+        val isInternal = dirPath.startsWith(context.filesDir.absolutePath) ||
+            (context.cacheDir != null && dirPath.startsWith(context.cacheDir.absolutePath))
         return when {
-            outputRoot != null && dirRoot == outputRoot -> 0
-            inputRoot != null && dirRoot == inputRoot -> 1
-            dirPath.startsWith("/storage/emulated/") -> 2
-            else -> 3
+            isInternal -> 0
+            outputRoot != null && dirRoot == outputRoot -> 1
+            inputRoot != null && dirRoot == inputRoot -> 2
+            dirPath.startsWith("/storage/emulated/") -> 3
+            else -> 4
         }
     }
     fun operationTempCandidates(): List<File> {
         return (
-            context.getExternalFilesDirs("tmp").filterNotNull() +
-                listOf(File(context.filesDir, "tmp"))
+            listOf(File(context.filesDir, "tmp")) +
+                context.getExternalFilesDirs("tmp").filterNotNull()
             )
             .distinctBy { it.absolutePath }
             .sortedWith(compareBy<File> { tempRootScore(it) }.thenByDescending { it.usableSpace })
@@ -688,18 +820,34 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
         return roots.any { abs.startsWith(it) }
     }
 
+    fun externalStorageDocumentPath(documentId: String): String? {
+        val split = documentId.split(":", limit = 2)
+        if (split.isEmpty()) return null
+
+        val type = split[0]
+        val relativePath = split.getOrNull(1).orEmpty()
+        val root = if ("primary".equals(type, ignoreCase = true)) {
+            Environment.getExternalStorageDirectory().absolutePath
+        } else {
+            "/storage/$type"
+        }
+
+        return if (relativePath.isBlank()) root else "$root/$relativePath"
+    }
+
     fun resolvedLocalPathForUri(uri: Uri): String? {
+        if ("file".equals(uri.scheme, ignoreCase = true)) {
+            return uri.path?.takeIf { File(it).isFile && File(it).canRead() }
+        }
+        // Child file URIs inside a tree match BOTH isTreeUri and isDocumentUri.
+        // Must use the specific documentId so we map the file, not the parent tree.
         val documentId = when {
-            DocumentsContract.isTreeUri(uri) -> DocumentsContract.getTreeDocumentId(uri)
             DocumentsContract.isDocumentUri(context, uri) -> DocumentsContract.getDocumentId(uri)
-            "file".equals(uri.scheme, ignoreCase = true) -> return uri.path?.takeIf { File(it).isFile && isAppPrivatePath(it) }
+            DocumentsContract.isTreeUri(uri) -> DocumentsContract.getTreeDocumentId(uri)
             else -> return null
         }
-        // Do not attempt to map DocumentsContract IDs to raw /storage paths under scoped storage.
-        // Raw paths cannot be read by this app even if the OS exposes them. Always rely on
-        // content:// URIs + contentResolver for external/removable storage, and only return
-        // a plain path when we know it is app-private.
-        return null
+        val rawPath = externalStorageDocumentPath(documentId)
+        return rawPath?.takeIf { File(it).isFile && File(it).canRead() }
     }
 
     suspend fun getSourceRefSize(sourceRef: String): Long? {
@@ -810,10 +958,13 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
 
     suspend fun ensureNativeReadable(uriOrPath: String, label: String, targetDir: File? = null): String {
         if (uriOrPath.startsWith("content://")) {
+            val raw = resolvedLocalPathForUri(Uri.parse(uriOrPath))
+            if (raw != null) return raw
             return copyUriToCache(Uri.parse(uriOrPath), label, targetDir)
         }
-        if (isAppPrivatePath(uriOrPath)) { return uriOrPath }
         val f = File(uriOrPath)
+        if (f.exists() && f.canRead()) { return uriOrPath }
+        if (isAppPrivatePath(uriOrPath)) { return uriOrPath }
         val attemptUri = runCatching { Uri.fromFile(f) }.getOrNull()
             ?: throw IllegalStateException("Cannot read $uriOrPath and cannot convert to content URI. Re-pick the folder and grant full access.")
         return copyUriToCache(attemptUri, label, targetDir)
@@ -823,13 +974,15 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
         val scheme = uri.scheme
         if (scheme == null || scheme == "file") {
             val path = uri.path ?: return ""
+            if (File(path).exists() && File(path).canRead()) return path
             if (isAppPrivatePath(path)) return path
-            // External path — always stage to cache because canRead() is unreliable under scoped storage
             val f = File(path)
             val attemptUri = runCatching { Uri.fromFile(f) }.getOrNull()
                 ?: throw IllegalStateException("Cannot read $path and cannot convert to content URI. Re-pick the folder and grant full access.")
             return copyUriToCache(attemptUri, label, targetDir)
         }
+        val raw = resolvedLocalPathForUri(uri)
+        if (raw != null) return raw
         return copyUriToCache(uri, label, targetDir)
     }
 
@@ -1065,21 +1218,6 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
             appendLog("Import failed: ${err.message}")
             throw err
         }
-    }
-
-    fun externalStorageDocumentPath(documentId: String): String? {
-        val split = documentId.split(":", limit = 2)
-        if (split.isEmpty()) return null
-
-        val type = split[0]
-        val relativePath = split.getOrNull(1).orEmpty()
-        val root = if ("primary".equals(type, ignoreCase = true)) {
-            Environment.getExternalStorageDirectory().absolutePath
-        } else {
-            "/storage/$type"
-        }
-
-        return if (relativePath.isBlank()) root else "$root/$relativePath"
     }
 
     fun uriToPath(uri: Uri): String? {
@@ -1586,19 +1724,21 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                     val size = doc.length()
                     val modified = doc.lastModified()
                     val existing = existingByPath[path]
-                    mapped.add(
-                        if (existing != null && existing.size == size && existing.modified == modified) {
-                            existing
-                        } else {
-                            LibraryFile(
-                                path = path,
-                                filename = name,
-                                size = size,
-                                modified = modified,
-                                extension = extensionForPath(name).uppercase()
-                            )
-                        }
-                    )
+                    val cached = existing?.let { buildLibraryFileFromCache(it) }
+                    if (cached != null) {
+                        mapped.add(cached)
+                    } else {
+                        mapped.add(
+                            existing?.takeIf { it.size == size && it.modified == modified }
+                                ?: LibraryFile(
+                                    path = path,
+                                    filename = name,
+                                    size = size,
+                                    modified = modified,
+                                    extension = extensionForPath(name).uppercase()
+                                )
+                        )
+                    }
                 }
             } else {
                 val dir = File(viewModel.outputDirectory)
@@ -1619,19 +1759,21 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                     }
                     val path = file.absolutePath
                     val existing = existingByPath[path]
-                    mapped.add(
-                        if (existing != null && existing.size == file.length() && existing.modified == file.lastModified()) {
-                            existing
-                        } else {
-                            LibraryFile(
-                                path = path,
-                                filename = file.name,
-                                size = file.length(),
-                                modified = file.lastModified(),
-                                extension = extensionForPath(file.name).uppercase()
-                            )
-                        }
-                    )
+                    val cached = existing?.let { buildLibraryFileFromCache(it) }
+                    if (cached != null) {
+                        mapped.add(cached)
+                    } else {
+                        mapped.add(
+                            existing?.takeIf { it.size == file.length() && it.modified == file.lastModified() }
+                                ?: LibraryFile(
+                                    path = path,
+                                    filename = file.name,
+                                    size = file.length(),
+                                    modified = file.lastModified(),
+                                    extension = extensionForPath(file.name).uppercase()
+                                )
+                        )
+                    }
                 }
             }
             withContext(Dispatchers.Main) {
@@ -1660,83 +1802,37 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
             selectedTabIndex = 5
             return
         }
+        val unchecked = libraryFiles.mapIndexedNotNull { idx, file ->
+            val cached = buildLibraryFileFromCache(file)
+            if (cached != null) {
+                idx to cached
+            } else {
+                null
+            }
+        }
+        if (unchecked.size == libraryFiles.size) {
+            libraryFiles.clear()
+            libraryFiles.addAll(unchecked.map { it.second })
+            output = "Library versions restored from cache."
+            return
+        }
         val checked = withContext(Dispatchers.IO) {
             libraryFiles.map { file ->
+                val cached = buildLibraryFileFromCache(file)
+                if (cached != null) {
+                    return@map cached
+                }
                 val raw = NscbBridge.libraryStatus(file.path, viewModel.keysPath, titleDbCacheDir)
                 if (raw.startsWith("ERROR")) {
+                    putLibraryCacheEntry(file.path, file.size, file.modified, null, true, raw)
                     file.copy(titleSummary = raw, versionStatus = "error")
                 } else {
-                    val titles = JSONObject(raw).getJSONArray("titles")
-                    if (titles.length() == 0) {
-                        file.copy(titleSummary = "No title metadata found", versionStatus = "unknown")
-                    } else {
-                        val names = mutableListOf<String>()
-                        val versions = mutableListOf<String>()
-                        var imageUrl: String? = null
-                        var details = mutableListOf<LibraryTitleDetail>()
-                        var aggregateStatus = "current"
-                        for (i in 0 until titles.length()) {
-                            val item = titles.getJSONObject(i)
-                            val titleId = item.getString("title_id")
-                            val name = item.optString("title_name", "Unknown")
-                            val localVersion = item.getLong("local_version")
-                            val latestVersion = if (item.isNull("latest_version")) null else item.getLong("latest_version")
-                            val releaseDate = if (item.isNull("release_date")) null else item.getString("release_date")
-                            val publisher = if (item.isNull("publisher")) null else item.getString("publisher")
-                            val description = if (item.isNull("description")) null else item.getString("description")
-                            val detailImageUrl = if (item.isNull("image_url")) null else item.getString("image_url")
-                            val screenshotUrls = mutableListOf<String>()
-                            if (!item.isNull("screenshot_urls")) {
-                                val shots = item.getJSONArray("screenshot_urls")
-                                for (j in 0 until shots.length()) {
-                                    screenshotUrls.add(shots.getString(j))
-                                }
-                            }
-                            val languages = mutableListOf<String>()
-                            if (!item.isNull("languages")) {
-                                val langs = item.getJSONArray("languages")
-                                for (j in 0 until langs.length()) {
-                                    languages.add(langs.getString(j))
-                                }
-                            }
-                            if (imageUrl == null && !item.isNull("image_url")) {
-                                imageUrl = item.getString("image_url")
-                            }
-                            val status = item.getString("status")
-                            names.add("$name [$titleId]")
-                            versions.add("local $localVersion" + if (latestVersion != null) " / latest $latestVersion" else " / latest unknown")
-                            details.add(
-                                LibraryTitleDetail(
-                                    titleId = titleId,
-                                    titleName = name,
-                                    localVersion = localVersion,
-                                    latestVersion = latestVersion,
-                                    releaseDate = releaseDate,
-                                    publisher = publisher,
-                                    languages = languages,
-                                    description = description,
-                                    imageUrl = detailImageUrl,
-                                    screenshotUrls = screenshotUrls,
-                                    status = status
-                                )
-                            )
-                            aggregateStatus = when {
-                                status == "outdated" -> "outdated"
-                                aggregateStatus != "outdated" && status == "unknown" -> "unknown"
-                                else -> aggregateStatus
-                            }
-                        }
-                        file.copy(
-                            titleSummary = names.take(3).joinToString("\n"),
-                            versionSummary = versions.take(3).joinToString("\n"),
-                            versionStatus = aggregateStatus,
-                            imageUrl = imageUrl,
-                            details = details
-                        )
-                    }
+                    putLibraryCacheEntry(file.path, file.size, file.modified, raw, false)
+                    parseLibraryStatusJson(raw, file)
                 }
             }
         }
+        saveLibraryCache()
         libraryFiles.clear()
         libraryFiles.addAll(checked)
     }
@@ -1777,7 +1873,7 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                         output + "\n" + logs.trimEnd()
                     }
                 }
-                kotlinx.coroutines.delay(500)
+                kotlinx.coroutines.delay(100)
             }
         }
     }
@@ -1787,16 +1883,18 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
         ensureFileOperationStorage()
         setProgress("Scanning ${viewModel.outputDirectory}")
         runCatching {
+            val rawOutput = viewModel.outputDirectory
+            val rawReadable = rawOutput.isNotBlank() && File(rawOutput).isDirectory && File(rawOutput).canRead()
             val json = withContext(Dispatchers.IO) {
-                if (usesSafOutputFolder()) {
+                if (usesSafOutputFolder() && !rawReadable) {
                     val root = outputTreeDocument()
                     if (root != null) {
                         scanDirectoryFromDocumentTree(root)
                     } else {
-                        NscbBridge.scanDirectory(viewModel.outputDirectory, viewModel.keysPath, titleDbCacheDir)
+                        NscbBridge.scanDirectory(rawOutput, viewModel.keysPath, titleDbCacheDir)
                     }
                 } else {
-                    NscbBridge.scanDirectory(viewModel.outputDirectory, viewModel.keysPath, titleDbCacheDir)
+                    NscbBridge.scanDirectory(rawOutput, viewModel.keysPath, titleDbCacheDir)
                 }
             }
             if (json.startsWith("ERROR")) {
@@ -1954,6 +2052,7 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                         val readablePath = ensureNativeReadable(localPath, "import_game_check", tempDir)
                         try {
                             val faults = scanFaultyFilesAt(readablePath)
+                            flushRustLogs()
                             if (faults.isNotEmpty()) {
                                 val refs = listOf(sourceLabel)
                                 faultyFiles.clear()
@@ -1977,6 +2076,7 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                             val suggested = withContext(Dispatchers.IO) {
                                 NscbBridge.getSuggestedFileName(readablePath, viewModel.keysPath, titleDbCacheDir, mergeType)
                             }
+                            flushRustLogs()
                             val fileName = replaceTempDerivedPackageStem(
                                 filenameForSingleImport(readablePath, suggested),
                                 name
@@ -2087,40 +2187,73 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     }
 
     if (showConsoleModal) {
-        AlertDialog(
-            modifier = Modifier.fillMaxWidth(0.96f),
+        Dialog(
             onDismissRequest = { showConsoleModal = false },
-            title = { Text(if (isRunning) "Progress" else "Console") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.96f)
+                    .fillMaxHeight(0.92f)
+                    .padding(8.dp),
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Title row
+                    Text(
+                        text = if (isRunning) "Progress" else "Console",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    // Progress section
                     if (isRunning) {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Text(progressStatus, style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            progressStatus,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
+                    // Verbose log area
+                    val scrollState = rememberScrollState()
+                    LaunchedEffect(output) { scrollState.animateScrollTo(scrollState.maxValue) }
                     Text(
                         text = output,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(280.dp)
-                            .verticalScroll(rememberScrollState())
-                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
-                            .padding(8.dp),
+                            .weight(1f)
+                            .verticalScroll(scrollState)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                            .padding(10.dp),
                         style = MaterialTheme.typography.bodySmall
                     )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showConsoleModal = false }) {
-                    Text("Hide")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { output = "Cleared" }) {
-                    Text("Clear")
+                    // Actions row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = { output = "Cleared" }) {
+                            Text("Clear")
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = { showConsoleModal = false }) {
+                            Text("Hide")
+                        }
+                    }
                 }
             }
-        )
+        }
     }
 
     if (showPermissionWizard) {
@@ -2141,16 +2274,21 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                         hasPersistedTreePermission(viewModel.outputFolderUri, true) -> "granted"
                         else -> "set (tap Continue to use)"
                     }
-                    Text("Import folder: $importStatus")
-                    Text("Game library folder: $outputStatus")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { pickScanFolder.launch(null) }, enabled = !isRunning) {
-                            Text("Pick Import Folder")
+                        val allFilesStatus = when {
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.R -> "n/a"
+                            Environment.isExternalStorageManager() -> "allowed"
+                            else -> "denied"
                         }
-                        Button(onClick = { pickOutputFolder.launch(null) }, enabled = !isRunning) {
-                            Text("Pick Game Library")
+                        Text("Import folder: $importStatus")
+                        Text("Game library folder: $outputStatus")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { pickScanFolder.launch(null) }, enabled = !isRunning) {
+                                Text("Pick Import Folder")
+                            }
+                            Button(onClick = { pickOutputFolder.launch(null) }, enabled = !isRunning) {
+                                Text("Pick Game Library")
+                            }
                         }
-                    }
                 }
             },
             confirmButton = {

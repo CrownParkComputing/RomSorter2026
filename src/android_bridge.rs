@@ -40,6 +40,9 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_configureTempRoot(
     _class: JClass<'_>,
     temp_root: JString<'_>,
 ) -> jstring {
+    #[cfg(target_os = "android")]
+    crate::util::progress::init_android_logging();
+
     let result = (|| -> Result<String, String> {
         let root = jstr_to_string(&mut env, temp_root)?;
         let root = root.trim();
@@ -252,6 +255,10 @@ fn collect_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
 }
 
 fn validate_container_bounds(path: &Path, ks: &KeyStore) -> Result<(), String> {
+    progress::log(&format!(
+        "Validating container bounds: {}",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    ));
     let file_size = std::fs::metadata(path)
         .map_err(|e| format!("Unreadable or invalid file: {e}"))?
         .len();
@@ -266,13 +273,23 @@ fn validate_container_bounds(path: &Path, ks: &KeyStore) -> Result<(), String> {
 
     match ext.as_str() {
         "nsp" | "nsz" => {
+            progress::log("  Parsing NSP structure...");
             let nsp = crate::formats::nsp::Nsp::parse(&mut file)
                 .map_err(|e| format!("Invalid NSP/NSZ file format: {e}"))?;
-            for entry in nsp.all_entries() {
+            let entries = nsp.all_entries();
+            progress::log(&format!("  Found {} entries in NSP header", entries.len()));
+            for entry in entries {
                 let end = nsp
                     .file_abs_offset(entry)
                     .checked_add(entry.size)
                     .ok_or_else(|| format!("Entry {} has invalid size", entry.name))?;
+                progress::log(&format!(
+                    "    Entry '{}' starts at {}, ends at {} (file size {})",
+                    entry.name,
+                    nsp.file_abs_offset(entry),
+                    end,
+                    file_size
+                ));
                 if end > file_size {
                     return Err(format!(
                         "Entry {} ends at {} but file is only {} bytes",
@@ -282,6 +299,7 @@ fn validate_container_bounds(path: &Path, ks: &KeyStore) -> Result<(), String> {
             }
         }
         "xci" | "xcz" => {
+            progress::log("  Parsing XCI structure...");
             let xci = crate::formats::xci::Xci::parse(&mut file)
                 .map_err(|e| format!("Invalid XCI/XCZ file format: {e}"))?;
             let root_end = xci
@@ -289,18 +307,33 @@ fn validate_container_bounds(path: &Path, ks: &KeyStore) -> Result<(), String> {
                 .hfs0_offset
                 .checked_add(xci.header.hfs0_size)
                 .ok_or_else(|| "Root HFS0 size overflows".to_string())?;
+            progress::log(&format!(
+                "    Root HFS0 at offset {0} size {1} => end {2} (file size {3})",
+                xci.header.hfs0_offset, xci.header.hfs0_size, root_end, file_size
+            ));
             if root_end > file_size {
                 return Err(format!(
                     "Root HFS0 ends at {} but file is only {} bytes",
                     root_end, file_size
                 ));
             }
+            progress::log(&format!(
+                "    Root partition has {} entries",
+                xci.root_hfs0.entries.len()
+            ));
             for entry in &xci.root_hfs0.entries {
                 let end = xci
                     .root_hfs0
                     .file_abs_offset(entry)
                     .checked_add(entry.size)
                     .ok_or_else(|| format!("Partition {} has invalid size", entry.name))?;
+                progress::log(&format!(
+                    "      Partition '{}' offset {} size {} => end {}",
+                    entry.name,
+                    xci.root_hfs0.file_abs_offset(entry),
+                    entry.size,
+                    end
+                ));
                 if end > file_size {
                     return Err(format!(
                         "Partition {} ends at {} but file is only {} bytes",
@@ -308,10 +341,12 @@ fn validate_container_bounds(path: &Path, ks: &KeyStore) -> Result<(), String> {
                     ));
                 }
             }
-            for entry in xci
+            progress::log("    Scanning secure partition...");
+            let secure = xci
                 .secure_nca_entries(&mut file)
-                .map_err(|e| format!("Secure partition parse failed: {e}"))?
-            {
+                .map_err(|e| format!("Secure partition parse failed: {e}"))?;
+            progress::log(&format!("    Secure partition has {} NCA entries", secure.len()));
+            for entry in secure {
                 let end = entry
                     .abs_offset
                     .checked_add(entry.size)
@@ -327,6 +362,7 @@ fn validate_container_bounds(path: &Path, ks: &KeyStore) -> Result<(), String> {
         _ => return Err(format!("Unsupported file type for {}", path_str)),
     }
 
+    progress::log("  Bounds OK. Extracting title metadata from NCAs...");
     let (records, _, _) = crate::cli::collect_title_records(&[path_str.as_ref()], ks);
     if records.is_empty() {
         return Err("No title metadata found".to_string());

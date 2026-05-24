@@ -11,3 +11,17 @@ target/
 *.xci.zstd
 .idea/
 *.code-workspace
+
+# Android build artifacts
+android/app/build/
+android/.gradle/
+android/build/
+android/*/build/
+.gradle/
+*.class
+*.dex
+*.apk
+*.jar
+captured-images/
+debug_log.txt
+

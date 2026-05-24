@@ -11,6 +11,7 @@ use crate::formats::types::{ContentType, TitleType};
 use crate::formats::xci::Xci;
 use crate::keys::KeyStore;
 use crate::nutdb::{base_title_id, NutdbStore};
+use crate::util::progress;
 
 use regex::Regex;
 
@@ -1228,17 +1229,30 @@ fn collect_title_records_from_nsp(
     latest_version: &mut Option<u32>,
     title_name: &mut Option<String>,
 ) -> std::result::Result<(), ()> {
+    progress::log(&format!("Reading NSP: {}", path));
     let mut file = BufReader::new(File::open(path).map_err(|_| ())?);
     let nsp = Nsp::parse(&mut file).map_err(|_| ())?;
+    progress::log("  Parsed PFS0 container, scanning entries...");
 
     let mut found_any = false;
+    let mut cnmt_count = 0;
     for meta in nsp.cnmt_nca_entries(&mut file, ks) {
         if let Some(entry) = nsp.pfs0.find(&meta.filename) {
             let abs_offset = nsp.file_abs_offset(entry);
+            progress::log(&format!(
+                "  Found CNMT NCA at offset {}: {}",
+                abs_offset, entry.name
+            ));
             if let Some(cnmt) =
                 crate::ops::split::parse_cnmt_from_meta_nca(&mut file, abs_offset, ks)
             {
                 found_any = true;
+                cnmt_count += 1;
+                let tid = format!("{:016X}", cnmt.title_id);
+                progress::log(&format!(
+                    "    CNMT title_id={}, type={:?}, version={}",
+                    tid, cnmt.title_type_enum(), cnmt.version
+                ));
                 upsert_record(
                     out,
                     MergeTitleRecord {
@@ -1253,9 +1267,11 @@ fn collect_title_records_from_nsp(
             }
         }
     }
+    progress::log(&format!("  Total CNMT entries found: {}", cnmt_count));
 
     // Title lookup path similar to squirrel.get_title(): read CONTROL NCA -> NACP title.
     if title_name.is_none() {
+        progress::log("  Scanning CONTROL NCA(s) for title name...");
         for entry in nsp.nca_entries() {
             if let Ok(info) = crate::formats::nca::parse_nca_info(
                 &mut file,
@@ -1266,9 +1282,14 @@ fn collect_title_records_from_nsp(
             ) {
                 if info.content_type == Some(ContentType::Control) {
                     let abs_offset = nsp.file_abs_offset(entry);
+                    progress::log(&format!(
+                        "    Decrypting CONTROL NCA at offset {}: {}",
+                        abs_offset, entry.name
+                    ));
                     if let Some(name) = crate::ops::split::parse_nacp_title_from_control_nca(
                         &mut file, abs_offset, ks,
                     ) {
+                        progress::log(&format!("    Game title from NACP: {}", name));
                         *title_name = Some(name);
                         break;
                     }
@@ -1278,6 +1299,10 @@ fn collect_title_records_from_nsp(
     }
 
     if found_any {
+        progress::log(&format!(
+            "  NSP read complete. Title={:?}, LatestVersion={:?}",
+            title_name, latest_version
+        ));
         Ok(())
     } else {
         Err(())
@@ -1291,11 +1316,18 @@ fn collect_title_records_from_xci(
     latest_version: &mut Option<u32>,
     title_name: &mut Option<String>,
 ) -> std::result::Result<(), ()> {
+    progress::log(&format!("Reading XCI: {}", path));
     let mut file = BufReader::new(File::open(path).map_err(|_| ())?);
     let xci = Xci::parse(&mut file).map_err(|_| ())?;
+    progress::log(&format!(
+        "  Parsed XCI header. Root HFS0 at offset {}, size {}",
+        xci.header.hfs0_offset, xci.header.hfs0_size
+    ));
     let secure_entries = xci.secure_nca_entries(&mut file).map_err(|_| ())?;
+    progress::log(&format!("  Secure partition has {} NCA entries", secure_entries.len()));
 
     let mut found_any = false;
+    let mut cnmt_count = 0;
     for entry in &secure_entries {
         if let Ok(info) = crate::formats::nca::parse_nca_info(
             &mut file,
@@ -1305,10 +1337,20 @@ fn collect_title_records_from_xci(
             ks,
         ) {
             if info.content_type == Some(ContentType::Meta) {
+                progress::log(&format!(
+                    "    Found Meta NCA '{}' at offset {}",
+                    entry.name, entry.abs_offset
+                ));
                 if let Some(cnmt) =
                     crate::ops::split::parse_cnmt_from_meta_nca(&mut file, entry.abs_offset, ks)
                 {
                     found_any = true;
+                    cnmt_count += 1;
+                    let tid = format!("{:016X}", cnmt.title_id);
+                    progress::log(&format!(
+                        "      CNMT title_id={}, type={:?}, version={}",
+                        tid, cnmt.title_type_enum(), cnmt.version
+                    ));
                     upsert_record(
                         out,
                         MergeTitleRecord {
@@ -1332,23 +1374,34 @@ fn collect_title_records_from_xci(
                     );
                 }
             } else if info.content_type == Some(ContentType::Control) && title_name.is_none() {
+                progress::log(&format!(
+                    "    Found Control NCA '{}' at offset {}",
+                    entry.name, entry.abs_offset
+                ));
                 if let Some(name) = crate::ops::split::parse_nacp_title_from_control_nca(
                     &mut file,
                     entry.abs_offset,
                     ks,
                 ) {
+                    progress::log(&format!("      Game title from NACP: {}", name));
                     *title_name = Some(name);
                 }
             }
         }
     }
+    progress::log(&format!("  Total CNMT entries found: {}", cnmt_count));
 
     if found_any {
+        progress::log(&format!(
+            "  XCI read complete. Title={:?}, LatestVersion={:?}",
+            title_name, latest_version
+        ));
         return Ok(());
     }
 
     // Last fallback for unusual XCI layouts where Meta content-type detection fails:
     // parse explicit *.cnmt.nca entries by filename.
+    progress::log("  Trying fallback CNMT-by-filename scan...");
     for entry in &secure_entries {
         if entry.name.to_ascii_lowercase().ends_with(".cnmt.nca") {
             if let Some(cnmt) =
