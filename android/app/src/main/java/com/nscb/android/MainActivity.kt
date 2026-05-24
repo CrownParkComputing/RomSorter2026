@@ -232,6 +232,7 @@ data class LibraryFile(
     val size: Long,
     val modified: Long,
     val extension: String,
+    val titleId: String? = null,
     val titleSummary: String = "Not checked",
     val versionSummary: String = "",
     val versionStatus: String = "unknown",
@@ -405,6 +406,113 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
         val rawJson = entry.optString("rawJson", "")
         if (rawJson.isBlank()) return null
         return parseLibraryStatusJson(rawJson, base)
+    }
+
+    fun extractTitleIdFromFilename(fileName: String): String? {
+        val re = Regex("[\\[-]([0-9A-Fa-f]{16})[\\]-]")
+        val stem = File(fileName).nameWithoutExtension
+        return re.find(stem)?.groupValues?.get(1)?.uppercase()
+    }
+
+    fun extractLocalVersionFromFilename(fileName: String): Long {
+        val stem = File(fileName).nameWithoutExtension
+        val bracket = Regex("\\[v(\\d+)\\]").find(stem)
+        if (bracket != null) return bracket.groupValues[1].toLongOrNull() ?: 0
+        val dash = Regex("--v(\\d+)-").find(stem)
+        if (dash != null) return dash.groupValues[1].toLongOrNull() ?: 0
+        return 0
+    }
+
+    fun lookupLibraryTitlesBatch(files: List<LibraryFile>): Map<String, LibraryTitleDetail> {
+        val ids = files.mapNotNull { it.titleId ?: extractTitleIdFromFilename(it.filename) }.distinct().filter { it.length == 16 }
+        if (ids.isEmpty()) return emptyMap()
+        val raw = try {
+            NscbBridge.titleDbLookupBatch(ids.joinToString("\n"), titleDbCacheDir)
+        } catch (_: Exception) { "" }
+        if (raw.isBlank() || raw.startsWith("ERROR")) return emptyMap()
+        val out = mutableMapOf<String, LibraryTitleDetail>()
+        try {
+            val json = JSONObject(raw)
+            val arr = json.getJSONArray("results")
+            for (i in 0 until arr.length()) {
+                val item = arr.getJSONObject(i)
+                val tid = item.getString("title_id")
+                val name = item.optString("title_name", "Unknown")
+                val latest = if (item.isNull("latest_version")) null else item.getLong("latest_version")
+                val releaseDate = if (item.isNull("release_date")) null else item.getString("release_date")
+                val publisher = if (item.isNull("publisher")) null else item.getString("publisher")
+                val description = if (item.isNull("description")) null else item.getString("description")
+                val imageUrl = if (item.isNull("image_url")) null else item.getString("image_url")
+                val langs = mutableListOf<String>()
+                if (!item.isNull("languages")) {
+                    val la = item.getJSONArray("languages")
+                    for (j in 0 until la.length()) langs.add(la.getString(j))
+                }
+                val screenshots = mutableListOf<String>()
+                if (!item.isNull("screenshot_urls")) {
+                    val sc = item.getJSONArray("screenshot_urls")
+                    for (j in 0 until sc.length()) screenshots.add(sc.getString(j))
+                }
+                out[tid] = LibraryTitleDetail(
+                    titleId = tid,
+                    titleName = name,
+                    localVersion = 0,
+                    latestVersion = latest,
+                    releaseDate = releaseDate,
+                    publisher = publisher,
+                    languages = langs,
+                    description = description,
+                    imageUrl = imageUrl,
+                    screenshotUrls = screenshots,
+                    status = if (latest == null) "unknown" else "current"
+                )
+            }
+        } catch (_: Exception) { }
+        return out
+    }
+
+    fun buildLibraryFileFromBatch(base: LibraryFile, fromFilenameTid: String?, dbMap: Map<String, LibraryTitleDetail>): LibraryFile {
+        val tid = base.titleId ?: fromFilenameTid ?: return base
+        val db = dbMap[tid] ?: return base
+        val localVersion = base.titleId?.let { extractLocalVersionFromFilename(base.filename) } ?: 0
+        val status = when {
+            db.latestVersion != null && db.latestVersion > localVersion -> "outdated"
+            db.latestVersion != null -> "current"
+            else -> "unknown"
+        }
+        return base.copy(
+            titleId = tid,
+            titleSummary = "${db.titleName} [$tid]",
+            versionSummary = if (db.latestVersion != null) "local v${localVersion / 65536} / latest v${db.latestVersion / 65536}" else "local v${localVersion / 65536} / latest unknown",
+            versionStatus = status,
+            imageUrl = db.imageUrl,
+            details = listOf(db.copy(localVersion = localVersion, status = status))
+        )
+    }
+
+    fun buildSyntheticLibraryStatusJson(file: LibraryFile): String {
+        val detail = file.details.firstOrNull() ?: return "{}"
+        val jo = JSONObject()
+        val arr = JSONArray()
+        val item = JSONObject()
+        item.put("title_id", detail.titleId)
+        item.put("title_name", detail.titleName)
+        item.put("local_version", detail.localVersion)
+        item.put("latest_version", detail.latestVersion ?: JSONObject.NULL)
+        item.put("release_date", detail.releaseDate ?: JSONObject.NULL)
+        item.put("publisher", detail.publisher ?: JSONObject.NULL)
+        item.put("description", detail.description ?: JSONObject.NULL)
+        item.put("image_url", detail.imageUrl ?: JSONObject.NULL)
+        item.put("status", detail.status)
+        val langs = JSONArray()
+        detail.languages.forEach { langs.put(it) }
+        item.put("languages", langs)
+        val shots = JSONArray()
+        detail.screenshotUrls.forEach { shots.put(it) }
+        item.put("screenshot_urls", shots)
+        arr.put(item)
+        jo.put("titles", arr)
+        return jo.toString()
     }
 
     fun putLibraryCacheEntry(path: String, size: Long, modified: Long, raw: String?, hasError: Boolean = false, titleSummary: String = "") {
@@ -1714,11 +1822,6 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                     setProgress("Loading library from ${viewModel.outputDirectory} (${docs.size} file(s))")
                 }
                 for ((index, doc) in docs.withIndex()) {
-                    if (index == 0 || (index + 1) % 10 == 0 || index + 1 == docs.size) {
-                        withContext(Dispatchers.Main) {
-                            appendLog("[${index + 1}/${docs.size}] Indexing ${doc.name ?: doc.uri.toString()}")
-                        }
-                    }
                     val path = doc.uri.toString()
                     val name = doc.name ?: doc.uri.lastPathSegment ?: "file"
                     val size = doc.length()
@@ -1727,55 +1830,55 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                     val cached = existing?.let { buildLibraryFileFromCache(it) }
                     if (cached != null) {
                         mapped.add(cached)
-                    } else {
-                        mapped.add(
-                            existing?.takeIf { it.size == size && it.modified == modified }
-                                ?: LibraryFile(
-                                    path = path,
-                                    filename = name,
-                                    size = size,
-                                    modified = modified,
-                                    extension = extensionForPath(name).uppercase()
-                                )
-                        )
+                        continue
                     }
+                    val tid = extractTitleIdFromFilename(name)
+                    val fresh = existing?.takeIf { it.size == size && it.modified == modified }
+                        ?: LibraryFile(path = path, filename = name, size = size, modified = modified, extension = extensionForPath(name).uppercase(), titleId = tid)
+                    mapped.add(fresh)
                 }
             } else {
                 val dir = File(viewModel.outputDirectory)
                 val files = dir.listFiles()
-                    ?.filter { file ->
-                        file.isFile && extensionForPath(file.name) in setOf("nsp", "nsz", "xci", "xcz", "nca", "ncz")
-                    }
-                    ?.sortedByDescending { it.lastModified() }
-                    ?: emptyList()
+                    ?.filter { file -> file.isFile && extensionForPath(file.name) in setOf("nsp", "nsz", "xci", "xcz", "nca", "ncz") }
+                    ?.sortedByDescending { it.lastModified() } ?: emptyList()
                 withContext(Dispatchers.Main) {
                     setProgress("Loading library from ${viewModel.outputDirectory} (${files.size} file(s))")
                 }
                 for ((index, file) in files.withIndex()) {
-                    if (index == 0 || (index + 1) % 10 == 0 || index + 1 == files.size) {
-                        withContext(Dispatchers.Main) {
-                            appendLog("[${index + 1}/${files.size}] Indexing ${file.name}")
-                        }
-                    }
                     val path = file.absolutePath
                     val existing = existingByPath[path]
                     val cached = existing?.let { buildLibraryFileFromCache(it) }
                     if (cached != null) {
                         mapped.add(cached)
-                    } else {
-                        mapped.add(
-                            existing?.takeIf { it.size == file.length() && it.modified == file.lastModified() }
-                                ?: LibraryFile(
-                                    path = path,
-                                    filename = file.name,
-                                    size = file.length(),
-                                    modified = file.lastModified(),
-                                    extension = extensionForPath(file.name).uppercase()
-                                )
-                        )
+                        continue
                     }
+                    val tid = extractTitleIdFromFilename(file.name)
+                    val fresh = existing?.takeIf { it.size == file.length() && it.modified == file.lastModified() }
+                        ?: LibraryFile(path = path, filename = file.name, size = file.length(), modified = file.lastModified(), extension = extensionForPath(file.name).uppercase(), titleId = tid)
+                    mapped.add(fresh)
                 }
             }
+
+            // Fast filename-based batch titleDb enrichment for files not already cached/resolved
+            val withoutMeta = mapped.filter { it.titleId != null && (it.titleSummary == "Not checked" || it.titleSummary == "No title metadata found") }
+            if (withoutMeta.isNotEmpty()) {
+                withContext(Dispatchers.Main) { setProgress("Resolving ${withoutMeta.size} title(s) from filename...") }
+                val dbMap = lookupLibraryTitlesBatch(withoutMeta)
+                for (i in mapped.indices) {
+                    val file = mapped[i]
+                    if (file.titleId != null && (file.titleSummary == "Not checked" || file.titleSummary == "No title metadata found")) {
+                        val enriched = buildLibraryFileFromBatch(file, file.titleId, dbMap)
+                        if (enriched.imageUrl != null || enriched.titleSummary != file.titleSummary) {
+                            putLibraryCacheEntry(file.path, file.size, file.modified,
+                                buildSyntheticLibraryStatusJson(enriched), false, enriched.titleSummary)
+                        }
+                        mapped[i] = enriched
+                    }
+                }
+                saveLibraryCache()
+            }
+
             withContext(Dispatchers.Main) {
                 libraryFiles.clear()
                 libraryFiles.addAll(mapped)
@@ -1802,39 +1905,58 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
             selectedTabIndex = 5
             return
         }
-        val unchecked = libraryFiles.mapIndexedNotNull { idx, file ->
-            val cached = buildLibraryFileFromCache(file)
-            if (cached != null) {
-                idx to cached
-            } else {
-                null
-            }
-        }
-        if (unchecked.size == libraryFiles.size) {
+        // Phase 1: restore from cache
+        val fromCache = libraryFiles.map { buildLibraryFileFromCache(it) }
+        if (fromCache.all { it != null }) {
             libraryFiles.clear()
-            libraryFiles.addAll(unchecked.map { it.second })
-            output = "Library versions restored from cache."
+            libraryFiles.addAll(fromCache.filterNotNull())
+            output = "Library versions verified from cache."
             return
         }
-        val checked = withContext(Dispatchers.IO) {
-            libraryFiles.map { file ->
-                val cached = buildLibraryFileFromCache(file)
-                if (cached != null) {
-                    return@map cached
+
+        // Phase 2: fast filename → TitlesDB batch lookup for files without valid cache
+        val uncached = libraryFiles.mapIndexedNotNull { idx, file ->
+            if (fromCache[idx] == null) idx to file else null
+        }
+        if (uncached.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                val filesToResolve = uncached.map { it.second }
+                val dbMap = lookupLibraryTitlesBatch(filesToResolve)
+                for ((idx, file) in uncached) {
+                    val tid = file.titleId ?: extractTitleIdFromFilename(file.filename)
+                    if (tid != null && dbMap[tid] != null) {
+                        val enriched = buildLibraryFileFromBatch(file, tid, dbMap)
+                        putLibraryCacheEntry(file.path, file.size, file.modified,
+                            buildSyntheticLibraryStatusJson(enriched), false, enriched.titleSummary)
+                        libraryFiles[idx] = enriched
+                    }
                 }
-                val raw = NscbBridge.libraryStatus(file.path, viewModel.keysPath, titleDbCacheDir)
-                if (raw.startsWith("ERROR")) {
-                    putLibraryCacheEntry(file.path, file.size, file.modified, null, true, raw)
-                    file.copy(titleSummary = raw, versionStatus = "error")
-                } else {
-                    putLibraryCacheEntry(file.path, file.size, file.modified, raw, false)
-                    parseLibraryStatusJson(raw, file)
-                }
+                saveLibraryCache()
             }
         }
-        saveLibraryCache()
-        libraryFiles.clear()
-        libraryFiles.addAll(checked)
+
+        // Phase 3: Rust file-parsing fallback for any files still unresolved
+        val stillUnresolved = libraryFiles.mapIndexedNotNull { idx, file ->
+            if (file.titleSummary == "Not checked" || file.titleSummary == "No title metadata found") idx else null
+        }
+        if (stillUnresolved.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                for (idx in stillUnresolved) {
+                    val file = libraryFiles[idx]
+                    val raw = NscbBridge.libraryStatus(file.path, viewModel.keysPath, titleDbCacheDir)
+                    val updated = if (raw.startsWith("ERROR")) {
+                        putLibraryCacheEntry(file.path, file.size, file.modified, null, true, raw)
+                        file.copy(titleSummary = raw, versionStatus = "error")
+                    } else {
+                        putLibraryCacheEntry(file.path, file.size, file.modified, raw, false)
+                        parseLibraryStatusJson(raw, file)
+                    }
+                    libraryFiles[idx] = updated
+                }
+            }
+            saveLibraryCache()
+        }
+        output = "Library versions checked. ${libraryFiles.count { it.versionStatus != "unknown" && it.versionStatus != "error" }} enriched."
     }
 
     suspend fun performFaultScan() {

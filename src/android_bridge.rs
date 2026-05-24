@@ -746,6 +746,139 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_libraryStatus(
     }
 }
 
+#[derive(Serialize)]
+struct FileTitleExtract {
+    title_id: Option<String>,
+    local_version: u32,
+    name_from_filename: Option<String>,
+}
+
+#[derive(Serialize)]
+struct BatchLookupResult {
+    title_id: String,
+    title_name: String,
+    latest_version: Option<u64>,
+    release_date: Option<String>,
+    publisher: Option<String>,
+    languages: Vec<String>,
+    description: Option<String>,
+    image_url: Option<String>,
+    screenshot_urls: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct BatchLookupResponse {
+    results: Vec<BatchLookupResult>,
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_nscb_android_NscbBridge_extractFileTitle(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    file_name: JString<'_>,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        let name = jstr_to_string(&mut env, file_name)?;
+        let stem = Path::new(&name)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let tid_re = regex::Regex::new(r"[\[-]([0-9A-Fa-f]{16})[\]-]").map_err(|e| e.to_string())?;
+        let title_id = tid_re.captures(&stem).map(|c| c[1].to_uppercase());
+
+        let ver_bracket_re = regex::Regex::new(r"\[v(\d+)\]").map_err(|e| e.to_string())?;
+        let ver_dash_re = regex::Regex::new(r"--v(\d+)-").map_err(|e| e.to_string())?;
+        let local_version = ver_bracket_re
+            .captures(&stem)
+            .or_else(|| ver_dash_re.captures(&stem))
+            .and_then(|c| c.get(1))
+            .and_then(|m| m.as_str().parse::<u32>().ok())
+            .unwrap_or(0);
+
+        let name_from_filename = if let Some(pos) = stem.find('[') {
+            let n = stem[..pos].trim();
+            if !n.is_empty() { Some(n.to_string()) } else { None }
+        } else {
+            None
+        };
+
+        let out = FileTitleExtract {
+            title_id,
+            local_version,
+            name_from_filename,
+        };
+        serde_json::to_string(&out).map_err(|e| e.to_string())
+    })();
+
+    match result {
+        Ok(msg) => to_jstring(&mut env, &msg),
+        Err(err) => to_jstring(&mut env, &format!("ERROR: {err}")),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_nscb_android_NscbBridge_titleDbLookupBatch(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    ids_joined: JString<'_>,
+    cache_dir: JString<'_>,
+) -> jstring {
+    let result = (|| -> Result<String, String> {
+        let ids_text = jstr_to_string(&mut env, ids_joined)?;
+        let cache = jstr_to_string(&mut env, cache_dir)?;
+
+        let nutdb = NutdbStore::new(Some(cache.trim()), None);
+        let index = nutdb
+            .try_load_cached_index()
+            .map_err(|e| format!("TitlesDB cache error: {e}"))?;
+        let versions_index = nutdb
+            .try_load_cached_versions_index()
+            .map_err(|e| format!("TitlesDB versions cache error: {e}"))?;
+
+        let ids: Vec<String> = ids_text
+            .lines()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && s.len() == 16)
+            .map(|s| s.to_ascii_uppercase())
+            .collect();
+
+        let mut results = Vec::new();
+        for id in ids {
+            let base_id = base_title_id(&id);
+            let meta = index.as_ref().and_then(|idx| idx.lookup(&base_id).or_else(|| idx.lookup(&id)));
+            let latest = versions_index
+                .as_ref()
+                .and_then(|idx| idx.latest_version_for(&base_id).or_else(|| idx.latest_version_for(&id)))
+                .or_else(|| meta.and_then(|m| m.version));
+            let name = index
+                .as_ref()
+                .and_then(|idx| idx.display_name_for(&base_id).or_else(|| idx.display_name_for(&id)))
+                .or_else(|| meta.and_then(|m| m.name.clone()))
+                .unwrap_or_else(|| "Unknown".to_string());
+            results.push(BatchLookupResult {
+                title_id: base_id.clone(),
+                title_name: name,
+                latest_version: latest,
+                release_date: meta.and_then(|m| m.release_date).map(format_release_date),
+                publisher: meta.and_then(|m| m.publisher.clone()),
+                languages: meta.map(|m| m.languages.clone()).unwrap_or_default(),
+                description: meta.and_then(|m| m.description.clone()),
+                image_url: meta.and_then(|m| m.banner_url.clone().or_else(|| m.icon_url.clone())),
+                screenshot_urls: meta.map(|m| m.screenshots.clone()).unwrap_or_default(),
+            });
+        }
+
+        serde_json::to_string(&BatchLookupResponse { results }).map_err(|e| e.to_string())
+    })();
+
+    match result {
+        Ok(msg) => to_jstring(&mut env, &msg),
+        Err(err) => to_jstring(&mut env, &format!("ERROR: {err}")),
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_nscb_android_NscbBridge_getLogs(
     mut env: JNIEnv<'_>,

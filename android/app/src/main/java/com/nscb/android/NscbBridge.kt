@@ -38,6 +38,10 @@ object NscbBridge {
 
     external fun libraryStatus(inputPath: String, keysPath: String, cacheDir: String): String
 
+    external fun extractFileTitle(fileName: String): String
+
+    external fun titleDbLookupBatch(idsJoined: String, cacheDir: String): String
+
     external fun getLogs(): String
 
     external fun deleteFile(path: String): String
