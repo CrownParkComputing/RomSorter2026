@@ -1957,7 +1957,9 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                 return@runCatching
             }
 
-            if (usesSafOutputFolder()) {
+            val rawOutput = viewModel.outputDirectory
+            val rawReadable = rawOutput.isNotBlank() && File(rawOutput).isDirectory && File(rawOutput).canRead()
+            if (usesSafOutputFolder() && !rawReadable) {
                 appendLog("SAF output folder active; skipping Rust renamePath (use manual rename).")
                 output = "SAF output folder active; skipping rename. Files verified."
                 return@runCatching
