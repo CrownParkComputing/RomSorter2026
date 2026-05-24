@@ -1,0 +1,44 @@
+NSCB Android Debug Log - 2026-05-24
+=====================================
+
+## Issue: Wizard showing on startup + "output folder permissions" error
+
+### Root cause found in logcat
+The USB drive (SanDisk, volume ID EADB-3ADD) was saved as both import and output folder.
+When the app starts, Android hasn't fully mounted the USB volume yet:
+
+  07:40:14.157  DocumentsProvider: java.io.FileNotFoundException: No root for EADB-3ADD
+  07:40:14.157  DocumentFile: Failed query: NullPointerException on Cursor.moveToFirst()
+  07:40:17.154  StorageManagerService: Failed to notify volume state changed for vol: SanDisk USB drive
+
+The app was calling hasPersistedTreePermission() → DocumentFile.fromTreeUri() → fails →
+permissionWizardReady() = false → wizard shown.
+
+Worse: performScan() was calling viewModel.clearOutputFolderUri() when the check failed,
+permanently destroying the saved URI.
+
+### Fixes applied 2026-05-24
+
+1. operationTempRoot() — now always uses context.filesDir/tmp (internal, always writable).
+   Previously used getExternalFilesDir("tmp") which failed on Retroid Pocket Flip2.
+
+2. performScan() — removed clearOutputFolderUri() call. Now just shows an error and returns
+   without destroying the saved URI. USB drive may mount after app start.
+
+3. permissionWizardReady() — simplified to just check if both URIs are non-blank.
+   Previously called hasPersistedTreePermission() which failed for unmounted USB volumes.
+   The full permission check still happens in performScan/importFolder when actually needed.
+
+4. Wizard LaunchedEffect — already fixed in previous session (removed two extra LaunchedEffect
+   blocks that re-triggered wizard on initial composition).
+
+### Device info
+- Retroid Pocket Flip2
+- Android 13
+- USB drive: SanDisk (volume EADB-3ADD, isUsb=true, isSd=false)
+- Output and import folders were both on USB drive
+
+### Still to watch
+- Does the app correctly handle USB drive mounting after startup?
+- Does performScan() work when USB is fully mounted?
+- Temp files now go to /data/data/com.nscb.android/files/tmp/ — confirm no permission errors

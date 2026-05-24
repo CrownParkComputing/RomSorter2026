@@ -1,0 +1,13 @@
+/target/
+/Cargo.lock
+target/
+*.nsp
+*.nsp.bak
+*.nro
+*.xci
+*.nca
+*.ncz
+*.nsp.zstd
+*.xci.zstd
+.idea/
+*.code-workspace
