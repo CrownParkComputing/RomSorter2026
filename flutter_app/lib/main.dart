@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'src/app_settings.dart';
 import 'src/screens/home_screen.dart';
+import 'src/screens/setup_wizard.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,7 +26,9 @@ class RomSorterApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: HomeScreen(settings: settings),
+      home: settings.setupComplete
+          ? HomeScreen(settings: settings)
+          : SetupWizard(settings: settings),
     );
   }
 }

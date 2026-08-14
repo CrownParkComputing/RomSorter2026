@@ -19,11 +19,14 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _libraryCtrl =
       TextEditingController(text: widget.settings.libraryDir);
+  late final TextEditingController _importCtrl =
+      TextEditingController(text: widget.settings.importDir);
   late final TextEditingController _keysCtrl =
       TextEditingController(text: widget.settings.keysPath);
 
   @override
   void dispose() {
+    _importCtrl.dispose();
     _libraryCtrl.dispose();
     _keysCtrl.dispose();
     super.dispose();
@@ -36,8 +39,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _save() async {
     widget.settings.libraryDir = _libraryCtrl.text.trim();
+    widget.settings.importDir = _importCtrl.text.trim();
     widget.settings.keysPath = _keysCtrl.text.trim();
-    await Directory(widget.settings.libraryDir).create(recursive: true);
+    await widget.settings.ensureDirs();
     await widget.settings.save();
     if (mounted) setState(() {});
     _toast('Settings saved');
@@ -82,6 +86,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               helperText:
                   'On iOS this defaults to the app Documents folder — visible '
                   'in the Files app, where you drop your ROM files.',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _importCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Import folder',
+              helperText: 'New files land here; Tools → Import moves them in',
               border: OutlineInputBorder(),
             ),
           ),

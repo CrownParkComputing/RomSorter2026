@@ -16,8 +16,8 @@ class ToolsScreen extends StatefulWidget {
 }
 
 class _ToolsScreenState extends State<ToolsScreen> {
-  List<String> _listRomFiles() {
-    final dir = Directory(widget.settings.libraryDir);
+  List<String> _listRomFiles({String? root}) {
+    final dir = Directory(root ?? widget.settings.libraryDir);
     if (!dir.existsSync()) return const [];
     const exts = {'.nsp', '.nsz', '.xci', '.xcz'};
     return dir
@@ -100,6 +100,36 @@ class _ToolsScreenState extends State<ToolsScreen> {
       ),
     );
     return result;
+  }
+
+  Future<void> _import() async {
+    final files = _listRomFiles(root: widget.settings.importDir);
+    if (files.isEmpty) {
+      _toast('No ROM files in ${widget.settings.importDir}');
+      return;
+    }
+    try {
+      final moved = await OpRunner.instance.run('Import', () async {
+        var count = 0;
+        for (final path in files) {
+          final dest =
+              '${widget.settings.libraryDir}/${path.split('/').last}';
+          final src = File(path);
+          try {
+            await src.rename(dest);
+          } on FileSystemException {
+            // Cross-device move: copy then delete.
+            await src.copy(dest);
+            await src.delete();
+          }
+          count++;
+        }
+        return count;
+      });
+      _toast('Imported $moved file(s) into the library');
+    } catch (e) {
+      _toast('$e');
+    }
   }
 
   Future<void> _bulkRename() => _guarded(
@@ -265,6 +295,12 @@ class _ToolsScreenState extends State<ToolsScreen> {
                   subtitle: const Text('Watch the Logs tab for progress'),
                 ),
               ),
+            _ToolTile(
+              icon: Icons.download_outlined,
+              title: 'Import new files',
+              subtitle: 'Move everything from the import folder into the library',
+              onTap: busy ? null : _import,
+            ),
             _ToolTile(
               icon: Icons.drive_file_rename_outline,
               title: 'Bulk rename',
