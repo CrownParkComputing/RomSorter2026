@@ -15,8 +15,8 @@ class DatabaseScreen extends StatefulWidget {
 }
 
 class _DatabaseScreenState extends State<DatabaseScreen> {
-  List<DbTitle>? _all;
-  List<DbTitle> _filtered = const [];
+  List<DbGroup>? _all;
+  List<DbGroup> _filtered = const [];
   String _query = '';
   bool _loading = false;
   String? _error;
@@ -33,10 +33,10 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
       _error = null;
     });
     try {
-      final titles = await TitleDb.loadIndex(widget.settings.cacheDir);
+      final groups = await TitleDb.loadGroups(widget.settings.cacheDir);
       if (!mounted) return;
       setState(() {
-        _all = titles;
+        _all = groups;
         _applyFilter();
       });
     } catch (e) {
@@ -66,21 +66,22 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
   }
 
   void _applyFilter() {
-    final all = _all ?? const <DbTitle>[];
+    final all = _all ?? const <DbGroup>[];
     final q = _query.trim().toLowerCase();
     _filtered = q.isEmpty
         ? all
         : all
-            .where((t) =>
-                t.name.toLowerCase().contains(q) ||
-                t.id.toLowerCase().contains(q) ||
-                (t.publisher?.toLowerCase().contains(q) ?? false))
+            .where((g) =>
+                g.name.toLowerCase().contains(q) ||
+                g.baseId.toLowerCase().contains(q) ||
+                (g.publisher?.toLowerCase().contains(q) ?? false) ||
+                g.dlc.any((d) => d.name.toLowerCase().contains(q)))
             .toList();
   }
 
-  Future<void> _showDetail(DbTitle title) async {
+  Future<void> _showDetail(DbGroup group) async {
     final detail =
-        await TitleDb.loadDetail(widget.settings.cacheDir, title.id);
+        await TitleDb.loadDetail(widget.settings.cacheDir, group.baseId);
     if (!mounted) return;
     final banner = (detail?['bannerUrl'] ?? detail?['iconUrl']) as String?;
     final description = detail?['description'] as String?;
@@ -99,14 +100,16 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
           controller: controller,
           padding: const EdgeInsets.all(16),
           children: [
-            Text(title.name, style: Theme.of(context).textTheme.titleLarge),
+            Text(group.name, style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 4),
             Text(
               [
-                title.id,
-                if (title.publisher != null) title.publisher!,
-                if (title.releaseDate != null)
-                  TitleDb.formatReleaseDate(title.releaseDate!),
+                group.baseId,
+                if (group.publisher != null) group.publisher!,
+                if (group.releaseDate != null)
+                  TitleDb.formatReleaseDate(group.releaseDate!),
+                if (group.latestVersion != null)
+                  'latest v${group.latestVersion}',
               ].join(' · '),
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -137,6 +140,19 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
                   ),
                 ),
               ),
+            ],
+            if (group.dlc.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text('DLC (${group.dlc.length})',
+                  style: Theme.of(context).textTheme.titleMedium),
+              for (final d in group.dlc)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.extension_outlined),
+                  title: Text(d.name),
+                  subtitle: Text(d.id),
+                ),
             ],
           ],
         ),
@@ -171,7 +187,7 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
             child: TextField(
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: 'Search name, publisher or title ID',
+                hintText: 'Search title, DLC, publisher or ID',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
@@ -208,14 +224,21 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
                             itemCount: _filtered.length,
                             itemExtent: 64,
                             itemBuilder: (context, i) {
-                              final t = _filtered[i];
+                              final g = _filtered[i];
+                              final parts = [
+                                if (g.publisher != null) g.publisher!,
+                                if (g.latestVersion != null)
+                                  'v${g.latestVersion}',
+                                if (g.dlc.isNotEmpty)
+                                  '${g.dlc.length} DLC',
+                              ];
                               return ListTile(
-                                leading: t.iconUrl != null
+                                leading: g.iconUrl != null
                                     ? ClipRRect(
                                         borderRadius:
                                             BorderRadius.circular(8),
                                         child: Image.network(
-                                          t.iconUrl!,
+                                          g.iconUrl!,
                                           width: 44,
                                           height: 44,
                                           fit: BoxFit.cover,
@@ -225,17 +248,25 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
                                         ),
                                       )
                                     : const Icon(Icons.videogame_asset),
-                                title: Text(t.name,
+                                title: Text(g.name,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis),
                                 subtitle: Text(
-                                  t.publisher == null
-                                      ? t.id
-                                      : '${t.publisher} · ${t.id}',
+                                  parts.isEmpty
+                                      ? g.baseId
+                                      : parts.join(' · '),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                onTap: () => _showDetail(t),
+                                trailing: g.dlc.isNotEmpty
+                                    ? Badge(
+                                        label:
+                                            Text('${g.dlc.length}'),
+                                        child: const Icon(
+                                            Icons.extension_outlined),
+                                      )
+                                    : null,
+                                onTap: () => _showDetail(g),
                               );
                             },
                           ),

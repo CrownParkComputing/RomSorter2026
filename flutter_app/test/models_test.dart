@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rom_sorter/src/native/nscb.dart';
+import 'package:rom_sorter/src/titledb.dart';
 
 void main() {
   test('ScanGroup parses bridge JSON', () {
@@ -39,5 +40,13 @@ void main() {
         '{"path":"/roms/bad.nsp","filename":"bad.nsp","reason":"truncated"}';
     final f = FaultyFile.fromJson(jsonDecode(json) as Map<String, dynamic>);
     expect(f.reason, 'truncated');
+  });
+
+  // Keep in lockstep with the base_title_id tests in src/nutdb.rs.
+  test('baseTitleId matches the Rust rules', () {
+    expect(baseTitleId('0100F8F0000A2000'), '0100F8F0000A2000'); // base
+    expect(baseTitleId('0100F8F0000A2800'), '0100F8F0000A2000'); // update
+    expect(baseTitleId('0100F8F0000A3401'), '0100F8F0000A2000'); // DLC
+    expect(baseTitleId('0100b04011743035'), '0100B04011742000'); // DLC, lower
   });
 }
