@@ -1,0 +1,8 @@
+// Links the nscb Rust core into the Runner binary.
+//
+// libnscb.a is produced by ios/ci_scripts/ci_post_clone.sh (Xcode Cloud) or
+// ios/scripts/build_rust.sh (a local Mac). -force_load keeps the nscb_*
+// symbols alive even though nothing references them at link time — the Dart
+// side resolves them at runtime through DynamicLibrary.process().
+NSCB_LIB_DIR = $(PROJECT_DIR)/Frameworks
+OTHER_LDFLAGS = $(inherited) -force_load $(NSCB_LIB_DIR)/libnscb.a -lresolv -framework Security -framework SystemConfiguration

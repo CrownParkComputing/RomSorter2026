@@ -10,5 +10,8 @@ pub mod nutdb;
 pub mod ops;
 pub mod util;
 
+pub mod bridge_core;
+pub mod ffi_bridge;
+
 #[cfg(target_os = "android")]
 pub mod android_bridge;

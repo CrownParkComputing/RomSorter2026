@@ -8,14 +8,12 @@ lazy_static! {
 }
 
 pub fn log(msg: &str) {
-    #[cfg(target_os = "android")]
-    {
-        let mut buffer = LOG_BUFFER.lock().unwrap();
-        buffer.push(msg.to_string());
-        if buffer.len() > 1000 {
-            buffer.remove(0);
-        }
+    let mut buffer = LOG_BUFFER.lock().unwrap();
+    buffer.push(msg.to_string());
+    if buffer.len() > 1000 {
+        buffer.remove(0);
     }
+    drop(buffer);
     println!("{}", msg);
 }
 
