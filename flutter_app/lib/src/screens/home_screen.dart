@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app_settings.dart';
 import '../native/nscb.dart';
 import '../op_runner.dart';
+import 'database_screen.dart';
 import 'library_screen.dart';
 import 'logs_screen.dart';
 import 'settings_screen.dart';
@@ -46,6 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final pages = [
       LibraryScreen(settings: widget.settings),
+      DatabaseScreen(settings: widget.settings),
       ToolsScreen(settings: widget.settings),
       const LogsScreen(),
       SettingsScreen(settings: widget.settings),
@@ -67,6 +69,8 @@ class _HomeScreenState extends State<HomeScreen> {
             destinations: const [
               NavigationDestination(
                   icon: Icon(Icons.video_library_outlined), label: 'Library'),
+              NavigationDestination(
+                  icon: Icon(Icons.storage_outlined), label: 'Database'),
               NavigationDestination(
                   icon: Icon(Icons.build_outlined), label: 'Tools'),
               NavigationDestination(
