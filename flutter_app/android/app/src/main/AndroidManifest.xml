@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Direct filesystem access to Download/ and a user-chosen library
+         folder; scoped storage has no path-based route to non-media files. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <application
         android:label="ROM Sorter"
         android:name="${applicationName}"

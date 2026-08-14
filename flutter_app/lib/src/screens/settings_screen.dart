@@ -47,6 +47,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _toast('Settings saved');
   }
 
+  Future<void> _browseInto(TextEditingController ctrl) async {
+    final path = await FilePicker.platform.getDirectoryPath();
+    if (path != null && mounted) setState(() => ctrl.text = path);
+  }
+
   Future<void> _importKeys() async {
     // file_picker copies the picked document into the app sandbox; we then
     // persist it beside the library so it survives tmp cleanup.
@@ -81,21 +86,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           TextField(
             controller: _libraryCtrl,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Library folder',
               helperText:
                   'On iOS this defaults to the app Documents folder — visible '
                   'in the Files app, where you drop your ROM files.',
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.folder_open),
+                tooltip: 'Browse',
+                onPressed: () => _browseInto(_libraryCtrl),
+              ),
             ),
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _importCtrl,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Import folder',
-              helperText: 'New files land here; Tools → Import moves them in',
-              border: OutlineInputBorder(),
+              helperText:
+                  'Scanned (with subfolders) by Tools → Import; defaults to '
+                  'Downloads on Android',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.folder_open),
+                tooltip: 'Browse',
+                onPressed: () => _browseInto(_importCtrl),
+              ),
             ),
           ),
           const SizedBox(height: 16),

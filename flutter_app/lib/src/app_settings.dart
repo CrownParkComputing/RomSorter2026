@@ -45,10 +45,23 @@ class AppSettings {
     final support = await getApplicationSupportDirectory();
     final temp = await getTemporaryDirectory();
 
+    // Android defaults: import straight from the shared Downloads folder and
+    // keep the library somewhere the user can see. Both need "All files
+    // access", which the setup wizard requests.
+    final defaultLibrary = Platform.isAndroid
+        ? '/storage/emulated/0/RomSorter'
+        : '${docs.path}/library';
+    final defaultImport = Platform.isAndroid
+        ? '/storage/emulated/0/Download'
+        : '${docs.path}/import';
+
     final settings = AppSettings._(
-      libraryDir: prefs.getString(_kLibraryDir) ?? '${docs.path}/library',
-      importDir: prefs.getString(_kImportDir) ?? '${docs.path}/import',
-      keysPath: prefs.getString(_kKeysPath) ?? '${docs.path}/prod.keys',
+      libraryDir: prefs.getString(_kLibraryDir) ?? defaultLibrary,
+      importDir: prefs.getString(_kImportDir) ?? defaultImport,
+      keysPath: prefs.getString(_kKeysPath) ??
+          (Platform.isAndroid
+              ? '$defaultLibrary/prod.keys'
+              : '${docs.path}/prod.keys'),
       cacheDir: '${support.path}/titledb',
       tempRoot: '${temp.path}/nscb',
       setupComplete: prefs.getBool(_kSetupComplete) ?? false,
@@ -61,9 +74,15 @@ class AppSettings {
   }
 
   Future<void> ensureDirs() async {
-    await Directory(libraryDir).create(recursive: true);
-    await Directory(importDir).create(recursive: true);
-    await Directory(cacheDir).create(recursive: true);
+    // Creation can fail before storage permission is granted; the wizard
+    // retries after the grant, so ignore failures here.
+    for (final dir in [libraryDir, importDir, cacheDir]) {
+      try {
+        await Directory(dir).create(recursive: true);
+      } on FileSystemException {
+        // ignore
+      }
+    }
   }
 
   Future<void> save() async {

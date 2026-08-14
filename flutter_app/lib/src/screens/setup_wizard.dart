@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../app_settings.dart';
 import '../native/nscb.dart';
@@ -27,6 +28,28 @@ class _SetupWizardState extends State<SetupWizard> {
   late final TextEditingController _importCtrl =
       TextEditingController(text: widget.settings.importDir);
   String? _keysError;
+  bool _storageGranted = !Platform.isAndroid;
+
+  @override
+  void initState() {
+    super.initState();
+    if (Platform.isAndroid) {
+      Permission.manageExternalStorage.isGranted
+          .then((granted) => mounted ? setState(() => _storageGranted = granted) : null);
+    }
+  }
+
+  Future<void> _requestStorage() async {
+    // Sends the user to the system "All files access" toggle for this app.
+    final status = await Permission.manageExternalStorage.request();
+    if (mounted) setState(() => _storageGranted = status.isGranted);
+    if (_storageGranted) await widget.settings.ensureDirs();
+  }
+
+  Future<void> _browseInto(TextEditingController ctrl) async {
+    final path = await FilePicker.platform.getDirectoryPath();
+    if (path != null && mounted) setState(() => ctrl.text = path);
+  }
 
   @override
   void dispose() {
@@ -100,6 +123,10 @@ class _SetupWizardState extends State<SetupWizard> {
         currentStep: _step,
         onStepContinue: () async {
           if (_step == 0) {
+            if (!_storageGranted) {
+              await _requestStorage();
+              if (!_storageGranted) return;
+            }
             await _savePaths();
             setState(() => _step = 1);
           } else if (_step == 1) {
@@ -146,27 +173,61 @@ class _SetupWizardState extends State<SetupWizard> {
                   Platform.isIOS
                       ? 'Both folders live inside this app\'s storage and are '
                           'visible in the Files app under "ROM Sorter".'
-                      : 'Both folders live under the app\'s external storage '
-                          'and are reachable with a file manager or adb.',
+                      : 'Imports are picked up from Downloads (subfolders '
+                          'included); the library is where your organized '
+                          'collection lives.',
                   style: theme.textTheme.bodySmall,
                 ),
+                if (Platform.isAndroid) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(
+                        _storageGranted
+                            ? Icons.check_circle
+                            : Icons.warning_amber,
+                        color: _storageGranted ? Colors.green : Colors.orange,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(_storageGranted
+                            ? 'Storage access granted'
+                            : 'Storage access is needed to read Downloads'),
+                      ),
+                      if (!_storageGranted)
+                        FilledButton.tonal(
+                          onPressed: _requestStorage,
+                          child: const Text('Grant'),
+                        ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 12),
                 TextField(
                   controller: _libraryCtrl,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Switch library folder',
                     helperText: 'Your organized collection lives here',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.folder_open),
+                      tooltip: 'Browse',
+                      onPressed: () => _browseInto(_libraryCtrl),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _importCtrl,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Import folder',
-                    helperText:
-                        'Drop new files here, then use Tools → Import',
-                    border: OutlineInputBorder(),
+                    helperText: 'Scanned (with subfolders) by Tools → Import',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.folder_open),
+                      tooltip: 'Browse',
+                      onPressed: () => _browseInto(_importCtrl),
+                    ),
                   ),
                 ),
               ],
