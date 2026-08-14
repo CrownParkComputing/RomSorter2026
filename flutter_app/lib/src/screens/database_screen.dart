@@ -213,83 +213,99 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.search),
-                hintText: 'Search title, DLC, publisher or ID',
-                border: const OutlineInputBorder(),
-                isDense: true,
-                suffixIcon: _searchCtrl.text.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear),
-                        tooltip: 'Clear search',
-                        onPressed: () => setState(() {
-                          _searchCtrl.clear();
-                          _applyFilter();
-                        }),
-                      ),
-              ),
-              onChanged: (_) => setState(_applyFilter),
-            ),
-          ),
-          Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
             child: Row(
               children: [
                 Expanded(
-                  child: DropdownButtonFormField<int?>(
-                    initialValue: _yearFilter,
-                    isDense: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Release year',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                  flex: 3,
+                  child: SizedBox(
+                    height: 40,
+                    child: TextField(
+                      controller: _searchCtrl,
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        hintText: 'Search title, DLC, publisher or ID',
+                        border: const OutlineInputBorder(),
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 8),
+                        isDense: true,
+                        suffixIcon: _searchCtrl.text.isEmpty
+                            ? null
+                            : IconButton(
+                                icon: const Icon(Icons.clear, size: 20),
+                                tooltip: 'Clear search',
+                                onPressed: () => setState(() {
+                                  _searchCtrl.clear();
+                                  _applyFilter();
+                                }),
+                              ),
+                      ),
+                      onChanged: (_) => setState(_applyFilter),
                     ),
-                    items: [
-                      const DropdownMenuItem<int?>(
-                          value: null, child: Text('Any year')),
-                      for (final y in _years)
-                        DropdownMenuItem<int?>(value: y, child: Text('$y')),
-                    ],
-                    onChanged: (v) => setState(() {
-                      _yearFilter = v;
-                      if (v == null) _monthFilter = null;
-                      _applyFilter();
-                    }),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: DropdownButtonFormField<int?>(
-                    initialValue: _monthFilter,
-                    isDense: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Month',
-                      border: OutlineInputBorder(),
+                  child: SizedBox(
+                    height: 40,
+                    child: DropdownButtonFormField<int?>(
+                      initialValue: _yearFilter,
                       isDense: true,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                            value: null, child: Text('Year')),
+                        for (final y in _years)
+                          DropdownMenuItem<int?>(value: y, child: Text('$y')),
+                      ],
+                      onChanged: (v) => setState(() {
+                        _yearFilter = v;
+                        if (v == null) _monthFilter = null;
+                        _applyFilter();
+                      }),
                     ),
-                    items: [
-                      const DropdownMenuItem<int?>(
-                          value: null, child: Text('Any month')),
-                      for (var m = 1; m <= 12; m++)
-                        DropdownMenuItem<int?>(
-                            value: m, child: Text(_monthNames[m - 1])),
-                    ],
-                    onChanged: _yearFilter == null
-                        ? null
-                        : (v) => setState(() {
-                              _monthFilter = v;
-                              _applyFilter();
-                            }),
                   ),
                 ),
-                if (_yearFilter != null || _searchCtrl.text.isNotEmpty) ...[
-                  const SizedBox(width: 8),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SizedBox(
+                    height: 40,
+                    child: DropdownButtonFormField<int?>(
+                      initialValue: _monthFilter,
+                      isDense: true,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                            value: null, child: Text('Month')),
+                        for (var m = 1; m <= 12; m++)
+                          DropdownMenuItem<int?>(
+                              value: m,
+                              child: Text(_monthNames[m - 1]
+                                  .substring(0, 3))),
+                      ],
+                      onChanged: _yearFilter == null
+                          ? null
+                          : (v) => setState(() {
+                                _monthFilter = v;
+                                _applyFilter();
+                              }),
+                    ),
+                  ),
+                ),
+                if (_yearFilter != null || _searchCtrl.text.isNotEmpty)
                   IconButton(
-                    icon: const Icon(Icons.filter_alt_off_outlined),
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.filter_alt_off_outlined, size: 20),
                     tooltip: 'Clear filters',
                     onPressed: () => setState(() {
                       _searchCtrl.clear();
@@ -298,7 +314,6 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
                       _applyFilter();
                     }),
                   ),
-                ],
               ],
             ),
           ),
