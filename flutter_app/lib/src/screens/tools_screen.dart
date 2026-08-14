@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../app_settings.dart';
+import '../import.dart';
 import '../native/nscb.dart';
 import '../op_runner.dart';
 
@@ -103,30 +104,12 @@ class _ToolsScreenState extends State<ToolsScreen> {
   }
 
   Future<void> _import() async {
-    final files = _listRomFiles(root: widget.settings.importDir);
-    if (files.isEmpty) {
-      _toast('No ROM files in ${widget.settings.importDir}');
-      return;
-    }
+    final importDir = widget.settings.importDir;
+    final libraryDir = widget.settings.libraryDir;
     try {
-      final moved = await OpRunner.instance.run('Import', () async {
-        var count = 0;
-        for (final path in files) {
-          final dest =
-              '${widget.settings.libraryDir}/${path.split('/').last}';
-          final src = File(path);
-          try {
-            await src.rename(dest);
-          } on FileSystemException {
-            // Cross-device move: copy then delete.
-            await src.copy(dest);
-            await src.delete();
-          }
-          count++;
-        }
-        return count;
-      });
-      _toast('Imported $moved file(s) into the library');
+      final summary = await OpRunner.instance.run(
+          'Import', () => importFromFolder(importDir, libraryDir));
+      _toast(summary);
     } catch (e) {
       _toast('$e');
     }
@@ -298,7 +281,8 @@ class _ToolsScreenState extends State<ToolsScreen> {
             _ToolTile(
               icon: Icons.download_outlined,
               title: 'Import new files',
-              subtitle: 'Move everything from the import folder into the library',
+              subtitle:
+                  'Move ROMs from the import folder (extracts zips) into the library',
               onTap: busy ? null : _import,
             ),
             _ToolTile(
