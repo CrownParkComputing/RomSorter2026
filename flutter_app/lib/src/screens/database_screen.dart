@@ -14,12 +14,34 @@ class DatabaseScreen extends StatefulWidget {
   State<DatabaseScreen> createState() => _DatabaseScreenState();
 }
 
+const _monthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 class _DatabaseScreenState extends State<DatabaseScreen> {
   List<DbGroup>? _all;
   List<DbGroup> _filtered = const [];
-  String _query = '';
+  final TextEditingController _searchCtrl = TextEditingController();
+  int? _yearFilter;
+  int? _monthFilter;
   bool _loading = false;
   String? _error;
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<int> get _years {
+    final all = _all ?? const <DbGroup>[];
+    final years = <int>{
+      for (final g in all)
+        if (g.releaseDate != null) g.releaseDate! ~/ 10000,
+    }..removeWhere((y) => y < 1900);
+    return years.toList()..sort((a, b) => b.compareTo(a));
+  }
 
   @override
   void initState() {
@@ -67,16 +89,24 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
 
   void _applyFilter() {
     final all = _all ?? const <DbGroup>[];
-    final q = _query.trim().toLowerCase();
-    _filtered = q.isEmpty
-        ? all
-        : all
-            .where((g) =>
-                g.name.toLowerCase().contains(q) ||
-                g.baseId.toLowerCase().contains(q) ||
-                (g.publisher?.toLowerCase().contains(q) ?? false) ||
-                g.dlc.any((d) => d.name.toLowerCase().contains(q)))
-            .toList();
+    final q = _searchCtrl.text.trim().toLowerCase();
+    _filtered = all.where((g) {
+      if (q.isNotEmpty &&
+          !(g.name.toLowerCase().contains(q) ||
+              g.baseId.toLowerCase().contains(q) ||
+              (g.publisher?.toLowerCase().contains(q) ?? false) ||
+              g.dlc.any((d) => d.name.toLowerCase().contains(q)))) {
+        return false;
+      }
+      if (_yearFilter != null) {
+        final date = g.releaseDate;
+        if (date == null || date ~/ 10000 != _yearFilter) return false;
+        if (_monthFilter != null && (date ~/ 100) % 100 != _monthFilter) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
   }
 
   Future<void> _showDetail(DbGroup group) async {
@@ -185,16 +215,91 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: TextField(
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
                 hintText: 'Search title, DLC, publisher or ID',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
                 isDense: true,
+                suffixIcon: _searchCtrl.text.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.clear),
+                        tooltip: 'Clear search',
+                        onPressed: () => setState(() {
+                          _searchCtrl.clear();
+                          _applyFilter();
+                        }),
+                      ),
               ),
-              onChanged: (v) => setState(() {
-                _query = v;
-                _applyFilter();
-              }),
+              onChanged: (_) => setState(_applyFilter),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int?>(
+                    initialValue: _yearFilter,
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Release year',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                          value: null, child: Text('Any year')),
+                      for (final y in _years)
+                        DropdownMenuItem<int?>(value: y, child: Text('$y')),
+                    ],
+                    onChanged: (v) => setState(() {
+                      _yearFilter = v;
+                      if (v == null) _monthFilter = null;
+                      _applyFilter();
+                    }),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButtonFormField<int?>(
+                    initialValue: _monthFilter,
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Month',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                          value: null, child: Text('Any month')),
+                      for (var m = 1; m <= 12; m++)
+                        DropdownMenuItem<int?>(
+                            value: m, child: Text(_monthNames[m - 1])),
+                    ],
+                    onChanged: _yearFilter == null
+                        ? null
+                        : (v) => setState(() {
+                              _monthFilter = v;
+                              _applyFilter();
+                            }),
+                  ),
+                ),
+                if (_yearFilter != null || _searchCtrl.text.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.filter_alt_off_outlined),
+                    tooltip: 'Clear filters',
+                    onPressed: () => setState(() {
+                      _searchCtrl.clear();
+                      _yearFilter = null;
+                      _monthFilter = null;
+                      _applyFilter();
+                    }),
+                  ),
+                ],
+              ],
             ),
           ),
           Expanded(
