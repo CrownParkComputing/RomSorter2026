@@ -8,6 +8,7 @@ pub mod formats;
 pub mod keys;
 pub mod nutdb;
 pub mod ops;
+pub mod platform;
 pub mod util;
 
 pub mod bridge_core;

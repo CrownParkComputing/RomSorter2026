@@ -98,6 +98,15 @@ pub struct Args {
     #[arg(long = "nutdb-lookup", num_args = 1)]
     pub nutdb_lookup: Option<String>,
 
+    /// Organize ROMs in a source folder into per-platform subfolders under the library
+    /// (the --ofolder/<library> root). Defaults to moving; pass --copy to copy instead.
+    #[arg(long = "organize", num_args = 1)]
+    pub organize: Option<String>,
+
+    /// When organizing, copy files instead of moving them
+    #[arg(long = "copy")]
+    pub copy: bool,
+
     // === Options ===
     /// Output format: nsp or xci
     #[arg(long = "type", short = 't', default_value = "nsp")]
@@ -217,6 +226,21 @@ pub fn dispatch(args: Args) -> Result<()> {
         );
         let renamed = rename_target(path, ks, &index, rename_options)?;
         println!("Renamed {} item(s)", renamed);
+        return Ok(());
+    }
+
+    if let Some(source) = &args.organize {
+        let library = args.ofolder.as_deref().ok_or_else(|| {
+            crate::error::NscbError::InvalidData(
+                "--organize requires --ofolder <library_root>".to_string(),
+            )
+        })?;
+        let summary = crate::platform::organize::organize_library(
+            Path::new(source),
+            Path::new(library),
+            !args.copy,
+        )?;
+        println!("{}", summary.report());
         return Ok(());
     }
 

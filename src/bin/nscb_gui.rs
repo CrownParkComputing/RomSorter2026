@@ -1,17 +1,43 @@
-use eframe::egui;
+//! NSCB Desktop GUI — Dear ImGui front end (imgui 0.12 + winit 0.30 + glow).
+//!
+//! Mirrors the Flutter app's Switch library workflow: scan a folder, group by
+//! base title, show NUTDB cover art, inspect metadata, delete duplicates/older
+//! versions, prepare merges, rename, and run the CLI operations.
+
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::num::NonZeroU32;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
+use std::time::Instant;
+
+use glow::HasContext;
+use glutin::{
+    config::ConfigTemplateBuilder,
+    context::{ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentContext},
+    display::{GetGlDisplay, GlDisplay},
+    surface::{GlSurface, Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface},
+};
+use imgui::{Condition, FontSource, TextureId, Ui};
+use imgui_glow_renderer::{AutoRenderer, TextureMap};
+use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use nscb::keys::KeyStore;
 use nscb::nutdb::NutdbStore;
+use raw_window_handle::HasWindowHandle;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::fs;
-use std::io::{BufRead, BufReader, Read};
-use std::path::Path;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::thread;
+use winit::dpi::LogicalSize;
+use winit::event::{Event, WindowEvent};
+use winit::event_loop::EventLoop;
+use winit::window::{Window, WindowAttributes};
+
+// ---------------------------------------------------------------------------
+// Operation model (unchanged from the egui GUI)
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GuiOperation {
@@ -101,6 +127,10 @@ impl GuiOperation {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Scan model
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone)]
 struct ScanFile {
     path: String,
@@ -119,6 +149,51 @@ struct ScanGroup {
     latest_version_db: Option<u64>,
     items: Vec<ScanFile>,
 }
+
+// ---------------------------------------------------------------------------
+// Worker events + prefs
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+enum WorkerEvent {
+    Started { command_line: String },
+    StdoutLine(String),
+    StderrLine(String),
+    Finished { status_ok: bool, exit_code: Option<i32> },
+    SpawnError(String),
+    ScanProgress(String),
+    ScanFinished(Result<Vec<ScanGroup>, String>),
+    DeleteFinished(Result<String, String>),
+    RenameFinished(Result<String, String>),
+    ImportFolderFinished(Result<String, String>),
+    OrganizeFinished(Result<String, String>),
+    RefreshTitleDbFinished(Result<String, String>),
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+struct GuiPrefs {
+    keys_path: String,
+    output_folder: String,
+    import_folder: String,
+    scan_path: String,
+    delete_sources_after_import: bool,
+    analyze_package_before_import: bool,
+    /// Per-platform libraries: each platform id -> its own ROMs folder.
+    platform_libraries: Vec<PlatformLibrary>,
+    /// The platform currently shown in the Library tab.
+    active_platform_id: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct PlatformLibrary {
+    platform_id: String,
+    folder: String,
+}
+
+// ---------------------------------------------------------------------------
+// AppState — all engine logic (ported unchanged from the egui GUI)
+// ---------------------------------------------------------------------------
 
 #[derive(Debug)]
 struct AppState {
@@ -147,45 +222,19 @@ struct AppState {
     delete_sources_after_import: bool,
     analyze_package_before_import: bool,
     scan_path: String,
+    platform_libraries: Vec<PlatformLibrary>,
+    active_platform_id: String,
     scan_results: Vec<ScanGroup>,
     selected_scan_group: usize,
+    show_details: bool,
+    details_popup_open: bool,
+    scan_generation: u64,
     is_running: bool,
     run_status: String,
     status_detail: String,
     progress_lines: usize,
-    ui_style_applied: bool,
     log: String,
     worker_rx: Option<Receiver<WorkerEvent>>,
-}
-
-#[derive(Debug)]
-enum WorkerEvent {
-    Started {
-        command_line: String,
-    },
-    StdoutLine(String),
-    StderrLine(String),
-    Finished {
-        status_ok: bool,
-        exit_code: Option<i32>,
-    },
-    SpawnError(String),
-    ScanProgress(String),
-    ScanFinished(Result<Vec<ScanGroup>, String>),
-    DeleteFinished(Result<String, String>),
-    RenameFinished(Result<String, String>),
-    ImportFolderFinished(Result<String, String>),
-    RefreshTitleDbFinished(Result<String, String>),
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct GuiPrefs {
-    keys_path: String,
-    output_folder: String,
-    import_folder: String,
-    scan_path: String,
-    delete_sources_after_import: bool,
-    analyze_package_before_import: bool,
 }
 
 impl Default for AppState {
@@ -216,13 +265,17 @@ impl Default for AppState {
             delete_sources_after_import: false,
             analyze_package_before_import: true,
             scan_path: String::new(),
+            platform_libraries: Vec::new(),
+            active_platform_id: "switch".to_string(),
             scan_results: Vec::new(),
             selected_scan_group: 0,
+            show_details: false,
+            details_popup_open: false,
+            scan_generation: 0,
             is_running: false,
             run_status: "Idle".to_string(),
             status_detail: String::new(),
             progress_lines: 0,
-            ui_style_applied: false,
             log: String::new(),
             worker_rx: None,
         };
@@ -238,42 +291,6 @@ impl Drop for AppState {
 }
 
 impl AppState {
-    fn apply_readable_style(&mut self, ctx: &egui::Context) {
-        if self.ui_style_applied {
-            return;
-        }
-
-        let mut style = (*ctx.style()).clone();
-        style.spacing.item_spacing = egui::vec2(10.0, 10.0);
-        style.spacing.button_padding = egui::vec2(12.0, 8.0);
-        style.spacing.interact_size.y = 32.0;
-
-        style.text_styles.insert(
-            egui::TextStyle::Heading,
-            egui::FontId::new(28.0, egui::FontFamily::Proportional),
-        );
-        style.text_styles.insert(
-            egui::TextStyle::Body,
-            egui::FontId::new(18.0, egui::FontFamily::Proportional),
-        );
-        style.text_styles.insert(
-            egui::TextStyle::Button,
-            egui::FontId::new(17.0, egui::FontFamily::Proportional),
-        );
-        style.text_styles.insert(
-            egui::TextStyle::Monospace,
-            egui::FontId::new(16.0, egui::FontFamily::Monospace),
-        );
-        style.text_styles.insert(
-            egui::TextStyle::Small,
-            egui::FontId::new(15.0, egui::FontFamily::Proportional),
-        );
-
-        ctx.set_style(style);
-        ctx.set_pixels_per_point(1.08);
-        self.ui_style_applied = true;
-    }
-
     fn push_log_line(&mut self, line: &str) {
         if !self.log.is_empty() {
             self.log.push('\n');
@@ -303,6 +320,50 @@ impl AppState {
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_ascii_lowercase()
+    }
+
+    fn platform_library_folder(&self, platform_id: &str) -> String {
+        self.platform_libraries
+            .iter()
+            .find(|p| p.platform_id == platform_id)
+            .map(|p| p.folder.clone())
+            .unwrap_or_default()
+    }
+
+    fn set_platform_library_folder(&mut self, platform_id: &str, folder: &str) {
+        let folder = folder.trim().to_string();
+        if let Some(p) = self
+            .platform_libraries
+            .iter_mut()
+            .find(|p| p.platform_id == platform_id)
+        {
+            p.folder = folder;
+        } else {
+            self.platform_libraries.push(PlatformLibrary {
+                platform_id: platform_id.to_string(),
+                folder,
+            });
+        }
+        self.sync_scan_path_from_active_platform();
+    }
+
+    fn active_platform_name(&self) -> &'static str {
+        nscb::platform::Platform::all()
+            .iter()
+            .find(|p| p.id() == self.active_platform_id)
+            .map(|p| p.name())
+            .unwrap_or("Switch")
+    }
+
+    /// Point scan_path at the active platform's configured library folder, if any.
+    fn sync_scan_path_from_active_platform(&mut self) {
+        let folder = self.platform_library_folder(&self.active_platform_id);
+        if !folder.is_empty() {
+            self.scan_path = folder.clone();
+            if self.output_folder.trim().is_empty() {
+                self.output_folder = folder;
+            }
+        }
     }
 
     fn prefs_file_path() -> Option<PathBuf> {
@@ -340,8 +401,19 @@ impl AppState {
         if !prefs.scan_path.trim().is_empty() {
             self.scan_path = prefs.scan_path;
         }
+        self.platform_libraries = prefs.platform_libraries;
+        if !prefs.active_platform_id.trim().is_empty() {
+            let id = prefs.active_platform_id.trim().to_string();
+            if nscb::platform::Platform::all()
+                .iter()
+                .any(|p| p.id() == id)
+            {
+                self.active_platform_id = id;
+            }
+        }
         self.delete_sources_after_import = prefs.delete_sources_after_import;
         self.analyze_package_before_import = prefs.analyze_package_before_import;
+        self.sync_scan_path_from_active_platform();
     }
 
     fn save_preferences(&self) {
@@ -358,6 +430,8 @@ impl AppState {
             scan_path: self.scan_path.trim().to_string(),
             delete_sources_after_import: self.delete_sources_after_import,
             analyze_package_before_import: self.analyze_package_before_import,
+            platform_libraries: self.platform_libraries.clone(),
+            active_platform_id: self.active_platform_id.clone(),
         };
         if let Ok(text) = serde_json::to_string_pretty(&prefs) {
             let _ = fs::write(path, text);
@@ -445,7 +519,6 @@ impl AppState {
             Ok(entries) => entries,
             Err(_) => return,
         };
-
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -471,7 +544,6 @@ impl AppState {
                 root.display()
             )));
         }
-
         let entries = match fs::read_dir(root) {
             Ok(entries) => entries,
             Err(err) => {
@@ -482,7 +554,6 @@ impl AppState {
                 return;
             }
         };
-
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -503,13 +574,11 @@ impl AppState {
         let mut files = Vec::new();
         Self::collect_merge_files_recursive(folder, &mut files);
         files.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
-
         self.input_list = files
             .iter()
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
             .join("\n");
-
         if files.is_empty() {
             self.push_log_line(&format!(
                 "No merge files found under {} (supported: .nsp, .nsx, .nsz, .xci, .xcz)",
@@ -638,12 +707,10 @@ impl AppState {
             args.push("--keys".to_string());
             args.push(self.keys_path.trim().to_string());
         }
-
         if !self.output_folder.trim().is_empty() {
             args.push("--ofolder".to_string());
             args.push(self.output_folder.trim().to_string());
         }
-
         if matches!(
             self.operation,
             GuiOperation::Merge | GuiOperation::Dspl | GuiOperation::Convert
@@ -651,7 +718,6 @@ impl AppState {
             args.push("--type".to_string());
             args.push(self.output_type.trim().to_string());
         }
-
         Ok(args)
     }
 
@@ -684,7 +750,6 @@ impl AppState {
                 "This operation needs an output folder. Choose one before running.".to_string(),
             );
         }
-
         if self.operation == GuiOperation::Compress {
             let ext = Self::extension_of(self.input_path.trim());
             match self.compress_mode {
@@ -712,13 +777,15 @@ impl AppState {
                 }
             }
         }
-
         if self.operation == GuiOperation::Decompress {
             let ext = Self::extension_of(self.input_path.trim());
             match self.decompress_mode {
                 DecompressInputMode::Auto => {
                     if ext != "nsz" && ext != "xcz" && ext != "ncz" {
-                        return Err("Decompress input must be .nsz, .xcz, or .ncz (or choose the correct mode).".to_string());
+                        return Err(
+                            "Decompress input must be .nsz, .xcz, or .ncz (or choose the correct mode)."
+                                .to_string(),
+                        );
                     }
                 }
                 DecompressInputMode::Nsz => {
@@ -754,8 +821,6 @@ impl AppState {
         self.create_output_path.clear();
         self.ifolder.clear();
         self.text_file.clear();
-        self.scan_results.clear();
-        self.selected_scan_group = 0;
         self.rsvcap.clear();
         self.keypatch.clear();
         self.status_detail = "Cleared input and output fields for next action.".to_string();
@@ -779,7 +844,6 @@ impl AppState {
         {
             return exe.with_file_name(cli_name);
         }
-
         PathBuf::from(cli_name)
     }
 
@@ -935,13 +999,11 @@ impl AppState {
                 if group.latest_version_db.is_none() {
                     group.latest_version_db = latest_version_db;
                 }
-
                 if group.title_name == "Unknown" {
                     if let Some(name) = &title_name {
                         group.title_name = name.clone();
                     }
                 }
-
                 group.items.push(ScanFile {
                     path: path_str.clone(),
                     filename: path
@@ -1010,7 +1072,6 @@ impl AppState {
         if !first.exists() {
             return first;
         }
-
         let path = Path::new(&sanitized);
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
         let ext = path
@@ -1099,7 +1160,10 @@ impl AppState {
         let input_root = PathBuf::from(&import_folder);
         let output_root = PathBuf::from(&output_folder);
         if !input_root.is_dir() {
-            return Err(format!("Import folder is not a directory: {}", input_root.display()));
+            return Err(format!(
+                "Import folder is not a directory: {}",
+                input_root.display()
+            ));
         }
         if output_folder.trim().is_empty() {
             return Err("Choose a game library/output folder before importing.".to_string());
@@ -1221,6 +1285,39 @@ impl AppState {
         });
     }
 
+    fn start_organize_folder(&mut self) {
+        if self.import_folder.trim().is_empty() {
+            self.run_status = "Validation error".to_string();
+            self.status_detail = "Choose an import folder to organize.".to_string();
+            return;
+        }
+        if self.output_folder.trim().is_empty() {
+            self.run_status = "Validation error".to_string();
+            self.status_detail = "Choose a library root folder to organize into.".to_string();
+            return;
+        }
+
+        self.is_running = true;
+        self.run_status = "Organizing".to_string();
+        self.status_detail = "Organizing import folder into per-platform library folders...".to_string();
+        self.push_log_line("Organizing folder into per-platform library...");
+        let import_folder = self.import_folder.trim().to_string();
+        let output_folder = self.output_folder.trim().to_string();
+        let delete_sources = self.delete_sources_after_import;
+        let (tx, rx) = mpsc::channel::<WorkerEvent>();
+        self.worker_rx = Some(rx);
+        thread::spawn(move || {
+            let result = nscb::platform::organize::organize_library(
+                Path::new(&import_folder),
+                Path::new(&output_folder),
+                delete_sources,
+            )
+            .map(|summary| summary.report())
+            .map_err(|e| e.to_string());
+            let _ = tx.send(WorkerEvent::OrganizeFinished(result));
+        });
+    }
+
     fn start_refresh_title_db(&mut self) {
         self.is_running = true;
         self.run_status = "Refreshing TitlesDB".to_string();
@@ -1314,7 +1411,6 @@ impl AppState {
                     Err(err) => errors.push(format!("{path}: {err}")),
                 }
             }
-
             let result = if errors.is_empty() {
                 Ok(format!("Deleted {deleted} {label} file(s)."))
             } else {
@@ -1371,7 +1467,6 @@ impl AppState {
                     Some("false"),
                     Some("tag"),
                 );
-
                 let mut renamed = 0_usize;
                 for path in paths {
                     renamed += nscb::cli::rename_target(&path, &ks, &index, options)
@@ -1396,7 +1491,6 @@ impl AppState {
                 .or_default()
                 .push(item);
         }
-
         let mut delete_paths = Vec::new();
         for items in by_exact.values_mut() {
             if items.len() < 2 {
@@ -1420,7 +1514,6 @@ impl AppState {
                 })
                 .or_insert(item.version);
         }
-
         group
             .items
             .iter()
@@ -1541,7 +1634,6 @@ impl AppState {
             let Some(rx) = &self.worker_rx else {
                 return;
             };
-
             loop {
                 match rx.try_recv() {
                     Ok(event) => events.push(event),
@@ -1637,6 +1729,9 @@ impl AppState {
                                 .sum::<usize>();
                             self.scan_results = groups;
                             self.selected_scan_group = 0;
+                            self.show_details = false;
+                            self.details_popup_open = false;
+                            self.scan_generation += 1;
                             self.run_status = "Success".to_string();
                             self.status_detail = format!(
                                 "Found {} title group(s), {} file(s), {} exact duplicate file(s).",
@@ -1715,6 +1810,29 @@ impl AppState {
                         self.worker_rx = None;
                     }
                 }
+                WorkerEvent::OrganizeFinished(result) => {
+                    saw_terminal_event = true;
+                    self.is_running = false;
+                    match result {
+                        Ok(msg) => {
+                            self.run_status = "Success".to_string();
+                            self.status_detail = msg.clone();
+                            self.push_log_line(&msg);
+                            if !self.output_folder.trim().is_empty() {
+                                self.scan_path = self.output_folder.clone();
+                                self.start_scan();
+                            }
+                        }
+                        Err(err) => {
+                            self.run_status = "Failed".to_string();
+                            self.status_detail = err.clone();
+                            self.push_log_line(&format!("Organize error: {err}"));
+                        }
+                    }
+                    if !self.is_running {
+                        self.worker_rx = None;
+                    }
+                }
                 WorkerEvent::RefreshTitleDbFinished(result) => {
                     saw_terminal_event = true;
                     self.is_running = false;
@@ -1738,671 +1856,951 @@ impl AppState {
         if disconnected && !saw_terminal_event && self.worker_rx.is_some() {
             self.is_running = false;
             self.run_status = "Worker disconnected".to_string();
-            self.status_detail =
-                "Background worker disconnected before producing output.".to_string();
+            self.status_detail = "Background worker disconnected before producing output.".to_string();
             self.push_log_line("Worker disconnected before producing output.");
             self.worker_rx = None;
         }
     }
 }
 
-impl eframe::App for AppState {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.apply_readable_style(ctx);
-        self.check_worker();
-        if self.is_running {
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+// ---------------------------------------------------------------------------
+// Cover art: NUTDB banner/icon download -> decode -> GL texture
+// ---------------------------------------------------------------------------
+
+enum CoverMsg {
+    Ready {
+        base_id: String,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    },
+    Failed {
+        base_id: String,
+        reason: String,
+    },
+}
+
+struct CoverCache {
+    cache_dir: PathBuf,
+    loaded: HashMap<String, (TextureId, u32, u32)>,
+    requested: HashSet<String>,
+    client: reqwest::blocking::Client,
+    tx: mpsc::Sender<CoverMsg>,
+    rx: Option<Receiver<CoverMsg>>,
+    generation: u64,
+}
+
+impl CoverCache {
+    fn new() -> Self {
+        let (tx, rx) = mpsc::channel::<CoverMsg>();
+        let cache_dir = if let Ok(dir) = std::env::var("XDG_CACHE_HOME") {
+            PathBuf::from(dir).join("nscb_gui").join("covers")
+        } else if let Ok(home) = std::env::var("HOME") {
+            PathBuf::from(home).join(".cache").join("nscb_gui").join("covers")
+        } else {
+            PathBuf::from(".nscb_gui_covers")
+        };
+        let _ = fs::create_dir_all(&cache_dir);
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("nscb-gui")
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_default();
+        Self {
+            cache_dir,
+            loaded: HashMap::new(),
+            requested: HashSet::new(),
+            client,
+            tx,
+            rx: Some(rx),
+            generation: 0,
+        }
+    }
+
+    fn request(&mut self, base_id: &str, url: Option<&str>) {
+        if self.loaded.contains_key(base_id) || self.requested.contains(base_id) {
+            return;
+        }
+        let Some(url) = url else {
+            return;
+        };
+        if url.trim().is_empty() {
+            return;
+        }
+        self.requested.insert(base_id.to_string());
+        let base_id = base_id.to_string();
+        let cache_file = self.cache_dir.join(format!("{base_id}.img"));
+
+        // Disk cache hit: decode now and hand the pixels to the same channel so
+        // poll_uploads does the real GL upload with a valid texture id.
+        if let Ok(bytes) = fs::read(&cache_file) {
+            if let Some((w, h, rgba)) = decode_rgba(&bytes) {
+                let _ = self.tx.send(CoverMsg::Ready {
+                    base_id,
+                    width: w,
+                    height: h,
+                    rgba,
+                });
+                return;
+            }
         }
 
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            ui.heading("NSCB Desktop GUI");
-            ui.label("Desktop wrapper around the existing nscb CLI operations.");
-            ui.separator();
+        let url = url.to_string();
+        let client = self.client.clone();
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = (|| -> Result<(u32, u32, Vec<u8>), String> {
+                let resp = client
+                    .get(&url)
+                    .send()
+                    .map_err(|e| format!("download failed: {e}"))?;
+                if !resp.status().is_success() {
+                    return Err(format!("HTTP {}", resp.status()));
+                }
+                let bytes = resp.bytes().map_err(|e| e.to_string())?;
+                let decoded = decode_rgba(&bytes)
+                    .ok_or_else(|| "unsupported image".to_string())?;
+                let _ = fs::create_dir_all(cache_file.parent().unwrap_or(Path::new(".")));
+                let _ = fs::write(&cache_file, &bytes);
+                Ok(decoded)
+            })();
+            match result {
+                Ok((w, h, rgba)) => {
+                    let _ = tx.send(CoverMsg::Ready {
+                        base_id,
+                        width: w,
+                        height: h,
+                        rgba,
+                    });
+                }
+                Err(reason) => {
+                    let _ = tx.send(CoverMsg::Failed { base_id, reason });
+                }
+            }
         });
+    }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Operation");
-                egui::ComboBox::from_id_salt("operation_combo")
-                    .selected_text(self.operation.label())
-                    .show_ui(ui, |ui| {
-                        for op in GuiOperation::all() {
-                            ui.selectable_value(&mut self.operation, op, op.label());
-                        }
-                    });
-            });
-
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                ui.label("Input path");
-                ui.text_edit_singleline(&mut self.input_path);
-                if ui.button("Browse file").clicked() {
-                    let mut dialog = FileDialog::new();
-                    if !self.scan_path.trim().is_empty() {
-                        dialog = dialog.set_directory(&self.scan_path);
-                    }
-                    if let Some(path) = dialog.pick_file() {
-                        self.input_path = path.display().to_string();
-                    }
+    fn poll_uploads(&mut self, gl: &glow::Context, renderer: &mut AutoRenderer) {
+        let Some(rx) = &self.rx else {
+            return;
+        };
+        loop {
+            match rx.try_recv() {
+                Ok(CoverMsg::Ready {
+                    base_id,
+                    width,
+                    height,
+                    rgba,
+                }) => {
+                    self.requested.remove(&base_id);
+                    let Some(tex) = upload_texture(gl, width, height, &rgba) else {
+                        continue;
+                    };
+                    let Some(tex_id) = renderer.texture_map_mut().register(tex) else {
+                        continue;
+                    };
+                    self.loaded.insert(base_id, (tex_id, width, height));
                 }
-                if ui.button("Browse dir").clicked() {
-                    let mut dialog = FileDialog::new();
-                    if !self.scan_path.trim().is_empty() {
-                        dialog = dialog.set_directory(&self.scan_path);
-                    }
-                    if let Some(path) = dialog.pick_folder() {
-                        self.input_path = path.display().to_string();
-                        if self.operation == GuiOperation::Merge {
-                            let selected = path.clone();
-                            self.populate_merge_list_from_folder(&selected);
-                        }
-                    }
+                Ok(CoverMsg::Failed { base_id, reason }) => {
+                    self.requested.remove(&base_id);
+                    eprintln!("cover failed for {base_id}: {reason}");
                 }
-            });
-
-            if self.operation == GuiOperation::Merge {
-                egui::ScrollArea::vertical()
-                    .max_height(180.0)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.input_list)
-                                .desired_rows(8)
-                                .desired_width(f32::INFINITY)
-                                .hint_text("/path/base.nsp\n/path/update.nsz\n/path/dlc.nsp"),
-                        );
-                    });
-                if ui.button("Add file to merge list").clicked() {
-                    let mut dialog = FileDialog::new();
-                    if !self.scan_path.trim().is_empty() {
-                        dialog = dialog.set_directory(&self.scan_path);
-                    }
-                    if let Some(path) = dialog.pick_file() {
-                        if !self.input_list.trim().is_empty() {
-                            self.input_list.push('\n');
-                        }
-                        self.input_list.push_str(&path.display().to_string());
-                    }
-                }
-                if ui.button("Scan folder into merge list").clicked() {
-                    if self.input_path.trim().is_empty() {
-                        self.push_log_line("Set Input path to a folder first, then click Scan folder into merge list.");
-                    } else {
-                        let folder = PathBuf::from(self.input_path.trim());
-                        if folder.is_dir() {
-                            self.populate_merge_list_from_folder(&folder);
-                        } else {
-                            self.push_log_line("Input path is not a folder; choose a directory for merge scan.");
-                        }
-                    }
-                }
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.nodelta, "nodelta");
-                    ui.checkbox(&mut self.print_version, "pv (print version changes)");
-                });
-                ui.label("Merge requires prod.keys. Set Keys path, or place prod.keys in a default location the CLI can detect.");
-                ui.horizontal(|ui| {
-                    ui.label("RSVcap");
-                    ui.text_edit_singleline(&mut self.rsvcap);
-                    ui.label("keypatch");
-                    ui.text_edit_singleline(&mut self.keypatch);
-                });
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break,
             }
+        }
+    }
 
-            if self.operation == GuiOperation::Create {
-                ui.horizontal(|ui| {
-                    ui.label("Create output path");
-                    ui.text_edit_singleline(&mut self.create_output_path);
-                    if ui.button("Save as").clicked() {
-                        if let Some(path) = FileDialog::new().save_file() {
-                            self.create_output_path = path.display().to_string();
-                        }
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Input folder (--ifolder)");
-                    ui.text_edit_singleline(&mut self.ifolder);
-                    if ui.button("Browse").clicked() {
-                        if let Some(path) = FileDialog::new().pick_folder() {
-                            self.ifolder = path.display().to_string();
-                        }
-                    }
-                });
+    /// Drop GL textures from a previous scan once the scan generation changes.
+    fn reset_for_new_scan(&mut self, gl: &glow::Context, generation: u64, renderer: &mut AutoRenderer) {
+        if generation == self.generation {
+            return;
+        }
+        self.generation = generation;
+        for (_, (tex_id, _, _)) in self.loaded.drain() {
+            if let Some(tex) = renderer.texture_map().gl_texture(tex_id) {
+                unsafe { gl.delete_texture(tex) };
             }
+        }
+        self.requested.clear();
+    }
 
-            if self.operation == GuiOperation::Rename {
-                ui.horizontal(|ui| {
-                    ui.label("renmode");
-                    ui.text_edit_singleline(&mut self.renmode);
-                    ui.label("addlangue");
-                    ui.text_edit_singleline(&mut self.addlangue);
-                });
-                ui.horizontal(|ui| {
-                    ui.label("noversion");
-                    ui.text_edit_singleline(&mut self.noversion);
-                    ui.label("dlcrname");
-                    ui.text_edit_singleline(&mut self.dlcrname);
-                });
-            }
-
-            if self.operation == GuiOperation::Verify {
-                ui.horizontal(|ui| {
-                    ui.label("vertype");
-                    ui.text_edit_singleline(&mut self.vertype);
-                });
-                ui.horizontal(|ui| {
-                    ui.label("text_file");
-                    ui.text_edit_singleline(&mut self.text_file);
-                    if ui.button("Save as").clicked() {
-                        if let Some(path) = FileDialog::new().save_file() {
-                            self.text_file = path.display().to_string();
-                        }
-                    }
-                });
-            }
-
-            if self.operation == GuiOperation::Scanner {
-                ui.group(|ui| {
-                    ui.heading("APK-style Library Workflow");
-                    ui.horizontal(|ui| {
-                        ui.label("Import folder");
-                        ui.text_edit_singleline(&mut self.import_folder);
-                        if ui.button("Browse").clicked() {
-                            if let Some(path) = FileDialog::new().pick_folder() {
-                                self.import_folder = path.display().to_string();
-                            }
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.checkbox(
-                            &mut self.analyze_package_before_import,
-                            "Analyze package before import",
-                        );
-                        ui.checkbox(
-                            &mut self.delete_sources_after_import,
-                            "Delete source files after successful import",
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(
-                                !self.is_running,
-                                egui::Button::new("Scan + Bulk Import Folder"),
-                            )
-                            .clicked()
-                        {
-                            self.start_import_folder();
-                        }
-                        if ui
-                            .add_enabled(!self.is_running, egui::Button::new("Refresh TitlesDB"))
-                            .clicked()
-                        {
-                            self.start_refresh_title_db();
-                        }
-                    });
-                });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Library folder");
-                    ui.text_edit_singleline(&mut self.scan_path);
-                    if ui.button("Browse").clicked() {
-                        if let Some(path) = FileDialog::new().pick_folder() {
-                            self.scan_path = path.display().to_string();
-                        }
-                    }
-                });
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(!self.is_running, egui::Button::new("Scan Library"))
-                        .clicked()
-                    {
-                        self.start_scan();
-                    }
-                    if ui
-                        .add_enabled(!self.is_running, egui::Button::new("Bulk Rename"))
-                        .clicked()
-                    {
-                        self.start_bulk_rename_scan_path();
-                    }
-                    ui.label(format!("{} group(s)", self.scan_results.len()));
-                });
-
-                ui.separator();
-                if !self.scan_results.is_empty() {
-                    if self.selected_scan_group >= self.scan_results.len() {
-                        self.selected_scan_group = self.scan_results.len() - 1;
-                    }
-                    let current = self.selected_scan_group;
-                    let group = self.scan_results[current].clone();
-                    let exact_duplicates = Self::exact_duplicate_paths_for_group(&group);
-                    let older_versions = Self::older_version_paths_for_group(&group);
-
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.heading("Current Game");
-                            ui.label(format!(
-                                "{} of {}",
-                                current + 1,
-                                self.scan_results.len()
-                            ));
-                            if ui
-                                .add_enabled(
-                                    !self.is_running && current > 0,
-                                    egui::Button::new("Previous"),
-                                )
-                                .clicked()
-                            {
-                                self.selected_scan_group -= 1;
-                            }
-                            if ui
-                                .add_enabled(
-                                    !self.is_running && current + 1 < self.scan_results.len(),
-                                    egui::Button::new("Next"),
-                                )
-                                .clicked()
-                            {
-                                self.selected_scan_group += 1;
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            ui.strong(&group.title_name);
-                            ui.monospace(&group.base_id);
-                            ui.label(format!("{} file(s)", group.items.len()));
-                            if let Some(latest) = group.latest_version_db {
-                                let local_latest = group
-                                    .items
-                                    .iter()
-                                    .map(|item| item.version as u64)
-                                    .max()
-                                    .unwrap_or(0);
-                                if latest > local_latest {
-                                    ui.colored_label(
-                                        egui::Color32::from_rgb(220, 150, 40),
-                                        format!("outdated: local v{}, latest v{}", local_latest, latest),
-                                    );
-                                } else {
-                                    ui.colored_label(
-                                        egui::Color32::from_rgb(30, 170, 90),
-                                        "current",
-                                    );
-                                }
-                            }
-                            if !exact_duplicates.is_empty() {
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(210, 80, 70),
-                                    format!("{} exact duplicate(s)", exact_duplicates.len()),
-                                );
-                            }
-                            if !older_versions.is_empty() {
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(220, 150, 40),
-                                    format!("{} older version(s)", older_versions.len()),
-                                );
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_enabled(
-                                    !self.is_running && group.items.len() > 1,
-                                    egui::Button::new("Prepare Merge"),
-                                )
-                                .clicked()
-                            {
-                                self.prepare_scan_group_for_merge(current);
-                            }
-                            if ui
-                                .add_enabled(
-                                    !self.is_running && !exact_duplicates.is_empty(),
-                                    egui::Button::new("Delete Exact Duplicates"),
-                                )
-                                .clicked()
-                            {
-                                self.start_delete_scanned_files(
-                                    exact_duplicates,
-                                    "exact duplicate",
-                                );
-                            }
-                            if ui
-                                .add_enabled(
-                                    !self.is_running && !older_versions.is_empty(),
-                                    egui::Button::new("Delete Older Versions"),
-                                )
-                                .clicked()
-                            {
-                                self.start_delete_scanned_files(older_versions, "older version");
-                            }
-                            if ui
-                                .add_enabled(!self.is_running, egui::Button::new("Rename Game Files"))
-                                .clicked()
-                            {
-                                self.start_rename_scan_group(current);
-                            }
-                            if ui
-                                .add_enabled(!self.is_running, egui::Button::new("Skip"))
-                                .clicked()
-                            {
-                                self.selected_scan_group =
-                                    (self.selected_scan_group + 1).min(self.scan_results.len() - 1);
-                            }
-                        });
-                    });
-                    ui.separator();
-                }
-
-                egui::ScrollArea::vertical()
-                    .max_height(420.0)
-                    .show(ui, |ui| {
-                        if self.scan_results.is_empty() {
-                            ui.label("No scan results.");
-                        }
-                        for group_index in 0..self.scan_results.len() {
-                            let group = self.scan_results[group_index].clone();
-                            ui.group(|ui| {
-                                let mut latest_version_by_title: HashMap<String, u32> =
-                                    HashMap::new();
-                                let mut exact_counts: HashMap<(String, u32, u64, String), usize> =
-                                    HashMap::new();
-                                let mut version_counts: HashMap<(String, u32), usize> =
-                                    HashMap::new();
-                                for item in &group.items {
-                                    latest_version_by_title
-                                        .entry(item.title_id.clone())
-                                        .and_modify(|version| {
-                                            if item.version > *version {
-                                                *version = item.version;
-                                            }
-                                        })
-                                        .or_insert(item.version);
-                                    *exact_counts
-                                        .entry((
-                                            item.title_id.clone(),
-                                            item.version,
-                                            item.size,
-                                            item.sha256.clone(),
-                                        ))
-                                        .or_default() += 1;
-                                    *version_counts
-                                        .entry((item.title_id.clone(), item.version))
-                                        .or_default() += 1;
-                                }
-                                let exact_duplicate_groups = exact_counts
-                                    .values()
-                                    .filter(|count| **count > 1)
-                                    .count();
-                                let older_files = group
-                                    .items
-                                    .iter()
-                                    .filter(|item| {
-                                        latest_version_by_title
-                                            .get(&item.title_id)
-                                            .copied()
-                                            .unwrap_or(item.version)
-                                            > item.version
-                                    })
-                                    .count();
-
-                                ui.horizontal(|ui| {
-                                    ui.strong(&group.title_name);
-                                    ui.monospace(&group.base_id);
-                                    if let Some(latest) = group.latest_version_db {
-                                        let local_latest = group
-                                            .items
-                                            .iter()
-                                            .map(|item| item.version as u64)
-                                            .max()
-                                            .unwrap_or(0);
-                                        if latest > local_latest {
-                                            ui.colored_label(
-                                                egui::Color32::from_rgb(220, 150, 40),
-                                                format!("OUTDATED v{} -> v{}", local_latest, latest),
-                                            );
-                                        }
-                                    }
-                                    if exact_duplicate_groups > 0 {
-                                        ui.colored_label(
-                                            egui::Color32::from_rgb(210, 80, 70),
-                                            format!("{exact_duplicate_groups} duplicate set(s)"),
-                                        );
-                                    }
-                                    if older_files > 0 {
-                                        ui.colored_label(
-                                            egui::Color32::from_rgb(220, 150, 40),
-                                            format!("{older_files} older file(s)"),
-                                        );
-                                    }
-                                    if group.items.len() > 1
-                                        && ui
-                                            .add_enabled(
-                                                !self.is_running,
-                                                egui::Button::new("Prepare merge"),
-                                            )
-                                            .clicked()
-                                    {
-                                        self.prepare_scan_group_for_merge(group_index);
-                                    }
-                                });
-
-                                let mut delete_path = None;
-                                for item in &group.items {
-                                    let exact_key = (
-                                        item.title_id.clone(),
-                                        item.version,
-                                        item.size,
-                                        item.sha256.clone(),
-                                    );
-                                    let version_key = (item.title_id.clone(), item.version);
-                                    let exact_duplicates =
-                                        exact_counts.get(&exact_key).copied().unwrap_or(0);
-                                    let same_version_count =
-                                        version_counts.get(&version_key).copied().unwrap_or(0);
-                                    let is_older = latest_version_by_title
-                                        .get(&item.title_id)
-                                        .copied()
-                                        .unwrap_or(item.version)
-                                        > item.version;
-                                    let has_same_version_other_content =
-                                        same_version_count > exact_duplicates;
-
-                                    ui.horizontal(|ui| {
-                                        ui.label(Self::kind_label(item.kind));
-                                        ui.monospace(&item.title_id);
-                                        ui.label(format!("v{}", item.version / 65536));
-                                        ui.label(Self::format_size(item.size));
-                                        ui.monospace(Self::short_hash(&item.sha256));
-                                        if exact_duplicates > 1 {
-                                            ui.colored_label(
-                                                egui::Color32::from_rgb(210, 80, 70),
-                                                "EXACT DUPLICATE",
-                                            );
-                                        } else if has_same_version_other_content {
-                                            ui.colored_label(
-                                                egui::Color32::from_rgb(220, 150, 40),
-                                                "SAME VERSION, DIFFERENT CONTENT",
-                                            );
-                                        } else if is_older {
-                                            ui.colored_label(
-                                                egui::Color32::from_rgb(220, 150, 40),
-                                                "OLDER VERSION",
-                                            );
-                                        }
-                                        ui.label(&item.filename);
-                                        if ui
-                                            .add_enabled(
-                                                !self.is_running,
-                                                egui::Button::new("Delete"),
-                                            )
-                                            .clicked()
-                                        {
-                                            delete_path = Some(item.path.clone());
-                                        }
-                                    });
-                                }
-                                if let Some(path) = delete_path {
-                                    self.start_delete_scanned_file(path);
-                                }
-                            });
-                        }
-                    });
-            }
-
-            if matches!(
-                self.operation,
-                GuiOperation::Merge | GuiOperation::Dspl | GuiOperation::Convert
-            ) {
-                ui.horizontal(|ui| {
-                    ui.label("Output type");
-                    ui.text_edit_singleline(&mut self.output_type);
-                });
-            }
-
-            if self.operation == GuiOperation::Compress {
-                ui.horizontal(|ui| {
-                    ui.label("Compression level");
-                    ui.add(egui::Slider::new(&mut self.compression_level, 1..=22));
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Compress mode");
-                    egui::ComboBox::from_id_salt("compress_mode_combo")
-                        .selected_text(self.compress_mode.label())
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.compress_mode,
-                                CompressInputMode::Auto,
-                                CompressInputMode::Auto.label(),
-                            );
-                            ui.selectable_value(
-                                &mut self.compress_mode,
-                                CompressInputMode::Nsp,
-                                CompressInputMode::Nsp.label(),
-                            );
-                            ui.selectable_value(
-                                &mut self.compress_mode,
-                                CompressInputMode::Xci,
-                                CompressInputMode::Xci.label(),
-                            );
-                        });
-                });
-            }
-
-            if self.operation == GuiOperation::Decompress {
-                ui.horizontal(|ui| {
-                    ui.label("Decompress mode");
-                    egui::ComboBox::from_id_salt("decompress_mode_combo")
-                        .selected_text(self.decompress_mode.label())
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.decompress_mode,
-                                DecompressInputMode::Auto,
-                                DecompressInputMode::Auto.label(),
-                            );
-                            ui.selectable_value(
-                                &mut self.decompress_mode,
-                                DecompressInputMode::Nsz,
-                                DecompressInputMode::Nsz.label(),
-                            );
-                            ui.selectable_value(
-                                &mut self.decompress_mode,
-                                DecompressInputMode::Xcz,
-                                DecompressInputMode::Xcz.label(),
-                            );
-                            ui.selectable_value(
-                                &mut self.decompress_mode,
-                                DecompressInputMode::Ncz,
-                                DecompressInputMode::Ncz.label(),
-                            );
-                        });
-                });
-            }
-
-            ui.horizontal(|ui| {
-                ui.label("Output folder");
-                ui.text_edit_singleline(&mut self.output_folder);
-                if ui.button("Browse").clicked() {
-                    if let Some(path) = FileDialog::new().pick_folder() {
-                        self.output_folder = path.display().to_string();
-                    }
-                }
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Keys path");
-                ui.text_edit_singleline(&mut self.keys_path);
-                if ui.button("Browse").clicked() {
-                    if let Some(path) = FileDialog::new().pick_file() {
-                        self.keys_path = path.display().to_string();
-                    }
-                }
-            });
-
-            ui.separator();
-
-            let status_color = match self.run_status.as_str() {
-                "Success" => egui::Color32::from_rgb(30, 170, 90),
-                "Failed" | "Validation error" | "Worker disconnected" => {
-                    egui::Color32::from_rgb(200, 60, 60)
-                }
-                "Running" => egui::Color32::from_rgb(220, 170, 40),
-                _ => egui::Color32::from_rgb(180, 180, 180),
-            };
-            ui.colored_label(status_color, format!("Status: {}", self.run_status));
-            if !self.status_detail.trim().is_empty() {
-                ui.label(self.status_detail.as_str());
-            }
-            if self.is_running {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(format!("Streaming progress... {} log lines", self.progress_lines));
-                });
-            }
-
-            ui.horizontal(|ui| {
-                let run_button = ui.add_enabled(!self.is_running, egui::Button::new("Run operation"));
-                if run_button.clicked() {
-                    self.start_run();
-                }
-
-                if ui.button("Clear log").clicked() {
-                    self.log.clear();
-                }
-
-                if ui
-                    .add_enabled(!self.is_running, egui::Button::new("Clear fields"))
-                    .clicked()
-                {
-                    self.clear_fields_for_next_job();
-                }
-            });
-
-            ui.separator();
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.log)
-                        .desired_rows(18)
-                        .desired_width(f32::INFINITY),
-                );
-            });
-        });
+    fn texture(&self, base_id: &str) -> Option<(TextureId, u32, u32)> {
+        self.loaded.get(base_id).copied()
     }
 }
 
-fn main() {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1380.0, 920.0])
-            .with_min_inner_size([980.0, 680.0]),
-        ..Default::default()
-    };
-    let app = AppState::default();
-    let run = eframe::run_native(
-        "NSCB Desktop GUI",
-        options,
-        Box::new(|_cc| Ok(Box::new(app))),
-    );
-
-    if let Err(err) = run {
-        eprintln!("Failed to start GUI: {err}");
-        std::process::exit(1);
+fn decode_rgba(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    let img = image::load_from_memory(bytes).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let raw = rgba.into_raw();
+    // Flip vertically: OpenGL textures have origin at bottom-left, imgui top-left.
+    let row = w as usize * 4;
+    let mut flipped = vec![0u8; raw.len()];
+    for y in 0..h as usize {
+        let src = y * row;
+        let dst = (h as usize - 1 - y) * row;
+        flipped[dst..dst + row].copy_from_slice(&raw[src..src + row]);
     }
+    Some((w, h, flipped))
+}
+
+fn upload_texture(gl: &glow::Context, w: u32, h: u32, rgba: &[u8]) -> Option<glow::Texture> {
+    unsafe {
+        let tex = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            w as i32,
+            h as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            Some(rgba),
+        );
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        Some(tex)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// imgui UI
+// ---------------------------------------------------------------------------
+
+fn status_color(status: &str) -> [f32; 4] {
+    match status {
+        "Success" => [0.2, 0.8, 0.3, 1.0],
+        "Failed" | "Validation error" | "Worker disconnected" => [0.9, 0.25, 0.25, 1.0],
+        "Running" | "Scanning" | "Importing" | "Deleting" | "Renaming" | "Refreshing TitlesDB" => {
+            [0.95, 0.7, 0.15, 1.0]
+        }
+        _ => [0.8, 0.8, 0.8, 1.0],
+    }
+}
+
+fn text_input(ui: &Ui, id: &str, value: &mut String) -> bool {
+    ui.input_text(id, value).build()
+}
+
+fn library_tab(
+    ui: &Ui,
+    state: &mut AppState,
+    covers: &mut CoverCache,
+    index: Option<&nscb::nutdb::NutdbIndex>,
+) {
+    ui_scan_controls(ui, state);
+
+    ui.separator();
+    ui.text_colored(status_color(&state.run_status), &format!("Status: {}", state.run_status));
+    if !state.status_detail.is_empty() {
+        ui.text_wrapped(&state.status_detail);
+    }
+    if state.is_running {
+        ui.text("Working... check the Logs tab for progress.");
+    }
+
+    ui.separator();
+
+    if state.scan_results.is_empty() {
+        ui.text_wrapped("No scan results yet. Choose a library folder and click Scan Library.");
+        return;
+    }
+
+    // Request covers for every group (from NUTDB index cache).
+    if let Some(index) = index {
+        for group in &state.scan_results {
+            let url = index
+                .lookup(&group.base_id)
+                .and_then(|t| t.banner_url.clone().or_else(|| t.icon_url.clone()));
+            covers.request(&group.base_id, url.as_deref());
+        }
+    }
+
+    // Cover grid.
+    let avail = ui.content_region_max();
+    let cols = ((avail[0] / 240.0).floor() as usize).clamp(1, 6);
+    ui.columns(cols as i32, "cover_grid", true);
+    let mut clicked: Option<usize> = None;
+    for (i, group) in state.scan_results.iter().enumerate() {
+        let (thumb_w, thumb_h) = (220.0, 124.0);
+        if let Some((tex, _w, _h)) = covers.texture(&group.base_id) {
+            if ui.image_button(&format!("##cover{i}"), tex, [thumb_w, thumb_h]) {
+                clicked = Some(i);
+            }
+        } else {
+            // Placeholder box while the cover downloads.
+            ui.text_colored([0.35, 0.4, 0.5, 1.0], "loading cover...");
+            if ui.button("view") {
+                clicked = Some(i);
+            }
+        }
+        ui.text_wrapped(&group.title_name);
+        ui.text_colored(
+            [0.6, 0.65, 0.7, 1.0],
+            &format!("{} file(s)", group.items.len()),
+        );
+        ui.next_column();
+    }
+    ui.columns(1, "cover_grid_end", true);
+
+    if let Some(i) = clicked {
+        state.selected_scan_group = i;
+        state.show_details = true;
+    }
+
+    if state.show_details {
+        if !state.details_popup_open {
+            ui.open_popup("##game_details");
+            state.details_popup_open = true;
+        }
+        ui.modal_popup("##game_details", || {
+            details_popup(ui, state, covers, index);
+        });
+    } else {
+        state.details_popup_open = false;
+    }
+}
+
+fn ui_scan_controls(ui: &Ui, state: &mut AppState) {
+    ui.group(|| {
+        ui.text("Per-platform library:");
+        // Platform picker (drives which platform's ROMs folder we scan/manage).
+        let platforms = nscb::platform::Platform::all();
+        let names: Vec<&str> = platforms.iter().map(|p| p.name()).collect();
+        let mut idx = platforms
+            .iter()
+            .position(|p| p.id() == state.active_platform_id)
+            .unwrap_or(0) as i32;
+        if ui_combo(ui, "##active_platform", &mut idx, &names) {
+            state.active_platform_id = platforms[idx as usize].id().to_string();
+            state.sync_scan_path_from_active_platform();
+        }
+        // Show the active platform's configured ROMs folder.
+        let configured = state.platform_library_folder(&state.active_platform_id);
+        ui.text_colored(
+            [0.6, 0.65, 0.7, 1.0],
+            &format!("{} library: {}",
+                state.active_platform_name(),
+                if configured.is_empty() { "(not set)".to_string() } else { configured }),
+        );
+        if ui.button("Set this platform's ROMs folder") {
+            if let Some(path) = FileDialog::new().pick_folder() {
+                let id = state.active_platform_id.clone();
+                state.set_platform_library_folder(&id, &path.display().to_string());
+            }
+        }
+        if ui.button("Reuse current folder") {
+            let id = state.active_platform_id.clone();
+            let folder = state.scan_path.clone();
+            state.set_platform_library_folder(&id, &folder);
+        }
+    });
+    ui.group(|| {
+        ui.text("Library folder:");
+        ui.set_next_item_width(320.0);
+        text_input(ui, "##scan_path", &mut state.scan_path);
+        if ui.button("Browse") {
+            if let Some(path) = FileDialog::new().pick_folder() {
+                state.scan_path = path.display().to_string();
+            }
+        }
+        if ui.button("Scan Library") && !state.is_running {
+            state.start_scan();
+        }
+        if ui.button("Bulk Rename") && !state.is_running {
+            state.start_bulk_rename_scan_path();
+        }
+    });
+    ui.group(|| {
+        ui.text("Keys (prod.keys):");
+        ui.set_next_item_width(320.0);
+        text_input(ui, "##keys_path", &mut state.keys_path);
+        if ui.button("Browse key file") {
+            if let Some(path) = FileDialog::new().pick_file() {
+                state.keys_path = path.display().to_string();
+            }
+        }
+        if ui.button("Refresh TitlesDB") && !state.is_running {
+            state.start_refresh_title_db();
+        }
+    });
+    ui.group(|| {
+        ui.text("Import folder:");
+        ui.set_next_item_width(260.0);
+        text_input(ui, "##import_folder", &mut state.import_folder);
+        if ui.button("Browse import") {
+            if let Some(path) = FileDialog::new().pick_folder() {
+                state.import_folder = path.display().to_string();
+            }
+        }
+        ui.text("Output library:");
+        ui.set_next_item_width(200.0);
+        text_input(ui, "##output_folder", &mut state.output_folder);
+        if ui.button("Browse output") {
+            if let Some(path) = FileDialog::new().pick_folder() {
+                state.output_folder = path.display().to_string();
+            }
+        }
+        if ui.button("Scan + Import") && !state.is_running {
+            state.start_import_folder();
+        }
+        ui.same_line();
+        if ui.small_button("Organize import into platform folders") && !state.is_running {
+            state.start_organize_folder();
+        }
+        ui.checkbox("delete source after organize/import", &mut state.delete_sources_after_import);
+    });
+}fn details_popup(
+    ui: &Ui,
+    state: &mut AppState,
+    covers: &mut CoverCache,
+    index: Option<&nscb::nutdb::NutdbIndex>,
+) {
+    let Some(group) = state.scan_results.get(state.selected_scan_group) else {
+        state.show_details = false;
+        return;
+    };
+    // Take owned copies now so the immutable borrow on state ends before the
+    // mutation buttons below run.
+    let base_id = group.base_id.clone();
+    let title_name = group.title_name.clone();
+    let latest_version_db = group.latest_version_db;
+    let items = group.items.clone();
+    let exact = AppState::exact_duplicate_paths_for_group(group);
+    let older = AppState::older_version_paths_for_group(group);
+
+    // Cover image (large).
+    if let Some((tex, w, h)) = covers.texture(&base_id) {
+        let scale = (480.0 / w as f32).min(270.0 / h as f32).min(1.0);
+        let dw = (w as f32 * scale).max(1.0);
+        let dh = (h as f32 * scale).max(1.0);
+        ui_image(ui, tex, [dw, dh]);
+        ui.same_line();
+    }
+
+    ui.text(&title_name);
+    ui.text_colored([0.6, 0.65, 0.7, 1.0], &format!("Title ID {base_id}"));
+
+    if let Some(index) = index {
+        if let Some(title) = index.lookup(&base_id) {
+            if let Some(pub_) = &title.publisher {
+                ui.text(&format!("Publisher: {pub_}"));
+            }
+            if let Some(rel) = title.release_date {
+                let year = rel / 10000;
+                let month = (rel / 100) % 100;
+                let day = rel % 100;
+                if year >= 1900 && (1..=12).contains(&month) && (1..=31).contains(&day) {
+                    ui.text(&format!("Released: {year:04}-{month:02}-{day:02}"));
+                }
+            }
+            if let Some(desc) = &title.description {
+                ui.text_wrapped(&format!("Description: {desc}"));
+            }
+        }
+    }
+
+    let local_latest = items
+        .iter()
+        .map(|item| item.version as u64)
+        .max()
+        .unwrap_or(0);
+    if let Some(latest) = latest_version_db {
+        if latest > local_latest {
+            ui.text_colored(
+                [0.95, 0.7, 0.15, 1.0],
+                &format!("OUTDATED: local v{local_latest}, latest v{latest}"),
+            );
+        } else {
+            ui.text_colored([0.2, 0.8, 0.3, 1.0], &format!("CURRENT (v{local_latest})"));
+        }
+    }
+    if !exact.is_empty() {
+        ui.text_colored([0.9, 0.25, 0.25, 1.0], &format!("{} exact duplicate(s)", exact.len()));
+    }
+    if !older.is_empty() {
+        ui.text_colored([0.95, 0.7, 0.15, 1.0], &format!("{} older version(s)", older.len()));
+    }
+
+    ui.separator();
+    if ui.button("Prepare Merge") && !state.is_running {
+        state.prepare_scan_group_for_merge(state.selected_scan_group);
+        state.show_details = false;
+    }
+    ui.same_line();
+    if ui.button("Rename Game Files") && !state.is_running {
+        state.start_rename_scan_group(state.selected_scan_group);
+        state.show_details = false;
+    }
+    ui.same_line();
+    if ui.button("Delete Exact Duplicates") && !state.is_running {
+        let paths = exact;
+        state.start_delete_scanned_files(paths, "exact duplicate");
+        state.show_details = false;
+    }
+    ui.same_line();
+    if ui.button("Delete Older Versions") && !state.is_running {
+        let paths = older;
+        state.start_delete_scanned_files(paths, "older version");
+        state.show_details = false;
+    }
+    ui.same_line();
+    if ui.button("Close") {
+        state.show_details = false;
+    }
+
+    ui.separator();
+    ui.text("Files:");
+    let mut delete_path: Option<String> = None;
+    for item in &items {
+        ui.text_colored(
+            [0.7, 0.75, 0.8, 1.0],
+            &format!(
+                "[{}] v{}  {}  {}  {}",
+                AppState::kind_label(item.kind),
+                item.version / 65536,
+                AppState::format_size(item.size),
+                AppState::short_hash(&item.sha256),
+                item.filename
+            ),
+        );
+        if ui.small_button(&format!("delete##{}", item.path)) {
+            delete_path = Some(item.path.clone());
+        }
+        ui.separator();
+    }
+    if let Some(path) = delete_path {
+        state.start_delete_scanned_file(path);
+        state.show_details = false;
+    }
+}
+
+fn ui_image(ui: &Ui, tex: TextureId, size: [f32; 2]) {
+    // Rendered via Image::new with uv hint to keep GL orientation correct.
+    imgui::Image::new(tex, size).build(ui);
+}
+
+fn operations_tab(ui: &Ui, state: &mut AppState) {
+    let ops = GuiOperation::all();
+    let labels: Vec<&str> = ops.iter().map(|op| op.label()).collect();
+    let mut op_idx = ops
+        .iter()
+        .position(|op| *op == state.operation)
+        .unwrap_or(0) as i32;
+    if ui_combo(ui, "Operation", &mut op_idx, &labels) {
+        state.operation = ops[op_idx as usize];
+    }
+
+    ui.separator();
+    ui.text("Input path:");
+    ui.set_next_item_width(420.0);
+    text_input(ui, "##input_path", &mut state.input_path);
+    if ui.button("Browse file") {
+        if let Some(path) = FileDialog::new().pick_file() {
+            state.input_path = path.display().to_string();
+        }
+    }
+    ui.same_line();
+    if ui.button("Browse dir") {
+        if let Some(path) = FileDialog::new().pick_folder() {
+            state.input_path = path.display().to_string();
+            if state.operation == GuiOperation::Merge {
+                let selected = path.clone();
+                state.populate_merge_list_from_folder(&selected);
+            }
+        }
+    }
+
+    if state.operation == GuiOperation::Merge {
+        ui.text("Merge inputs (one path per line):");
+        ui.input_text_multiline("##merge_list", &mut state.input_list, [420.0, 150.0])
+            .build();
+        if ui.button("Add file to merge list") {
+            if let Some(path) = FileDialog::new().pick_file() {
+                if !state.input_list.trim().is_empty() {
+                    state.input_list.push('\n');
+                }
+                state.input_list.push_str(&path.display().to_string());
+            }
+        }
+        ui.same_line();
+        if ui.button("Scan folder into merge list") {
+            let folder = PathBuf::from(state.input_path.trim());
+            if folder.is_dir() {
+                state.populate_merge_list_from_folder(&folder);
+            }
+        }
+        ui.checkbox("nodelta", &mut state.nodelta);
+        ui.same_line();
+        ui.checkbox("pv (print version changes)", &mut state.print_version);
+        ui.text("RSVcap:");
+        ui.set_next_item_width(120.0);
+        text_input(ui, "##rsvcap", &mut state.rsvcap);
+        ui.same_line();
+        ui.text("keypatch:");
+        ui.set_next_item_width(120.0);
+        text_input(ui, "##keypatch", &mut state.keypatch);
+    }
+
+    if state.operation == GuiOperation::Create {
+        ui.text("Create output path:");
+        ui.set_next_item_width(360.0);
+        text_input(ui, "##create_output", &mut state.create_output_path);
+        if ui.button("Save as") {
+            if let Some(path) = FileDialog::new().save_file() {
+                state.create_output_path = path.display().to_string();
+            }
+        }
+        ui.text("Input folder (--ifolder):");
+        ui.set_next_item_width(360.0);
+        text_input(ui, "##ifolder", &mut state.ifolder);
+        if ui.button("Browse") {
+            if let Some(path) = FileDialog::new().pick_folder() {
+                state.ifolder = path.display().to_string();
+            }
+        }
+    }
+
+    if state.operation == GuiOperation::Rename {
+        ui.text("renmode:");
+        ui.set_next_item_width(140.0);
+        text_input(ui, "##renmode", &mut state.renmode);
+        ui.same_line();
+        ui.text("addlangue:");
+        ui.set_next_item_width(80.0);
+        text_input(ui, "##addlangue", &mut state.addlangue);
+        ui.text("noversion:");
+        ui.set_next_item_width(140.0);
+        text_input(ui, "##noversion", &mut state.noversion);
+        ui.same_line();
+        ui.text("dlcrname:");
+        ui.set_next_item_width(80.0);
+        text_input(ui, "##dlcrname", &mut state.dlcrname);
+    }
+
+    if state.operation == GuiOperation::Verify {
+        ui.text("vertype (dec/sig/full):");
+        ui.set_next_item_width(100.0);
+        text_input(ui, "##vertype", &mut state.vertype);
+        ui.text("text_file (optional):");
+        ui.set_next_item_width(320.0);
+        text_input(ui, "##text_file", &mut state.text_file);
+        if ui.button("Save as") {
+            if let Some(path) = FileDialog::new().save_file() {
+                state.text_file = path.display().to_string();
+            }
+        }
+    }
+
+    if matches!(
+        state.operation,
+        GuiOperation::Merge | GuiOperation::Dspl | GuiOperation::Convert
+    ) {
+        ui.text("Output type (nsp/xci):");
+        ui.set_next_item_width(100.0);
+        text_input(ui, "##output_type", &mut state.output_type);
+    }
+
+    if state.operation == GuiOperation::Compress {
+        ui.text("Compression level:");
+        ui.slider("##level", 1, 22, &mut state.compression_level);
+        let modes = [
+            CompressInputMode::Auto.label(),
+            CompressInputMode::Nsp.label(),
+            CompressInputMode::Xci.label(),
+        ];
+        let mut idx = match state.compress_mode {
+            CompressInputMode::Auto => 0,
+            CompressInputMode::Nsp => 1,
+            CompressInputMode::Xci => 2,
+        } as i32;
+        if ui_combo(ui, "Compress mode", &mut idx, &modes) {
+            state.compress_mode = match idx {
+                1 => CompressInputMode::Nsp,
+                2 => CompressInputMode::Xci,
+                _ => CompressInputMode::Auto,
+            };
+        }
+    }
+
+    if state.operation == GuiOperation::Decompress {
+        let modes = [
+            DecompressInputMode::Auto.label(),
+            DecompressInputMode::Nsz.label(),
+            DecompressInputMode::Xcz.label(),
+            DecompressInputMode::Ncz.label(),
+        ];
+        let mut idx = match state.decompress_mode {
+            DecompressInputMode::Auto => 0,
+            DecompressInputMode::Nsz => 1,
+            DecompressInputMode::Xcz => 2,
+            DecompressInputMode::Ncz => 3,
+        } as i32;
+        if ui_combo(ui, "Decompress mode", &mut idx, &modes) {
+            state.decompress_mode = match idx {
+                1 => DecompressInputMode::Nsz,
+                2 => DecompressInputMode::Xcz,
+                3 => DecompressInputMode::Ncz,
+                _ => DecompressInputMode::Auto,
+            };
+        }
+    }
+
+    ui.separator();
+    ui.text("Output folder:");
+    ui.set_next_item_width(360.0);
+    text_input(ui, "##output_folder", &mut state.output_folder);
+    if ui.button("Browse") {
+        if let Some(path) = FileDialog::new().pick_folder() {
+            state.output_folder = path.display().to_string();
+        }
+    }
+
+    ui.separator();
+    ui.text_colored(status_color(&state.run_status), &format!("Status: {}", state.run_status));
+    if !state.status_detail.is_empty() {
+        ui.text_wrapped(&state.status_detail);
+    }
+
+    ui.separator();
+    if ui.button("Run operation") && !state.is_running {
+        state.start_run();
+    }
+    ui.same_line();
+    if ui.button("Clear fields") && !state.is_running {
+        state.clear_fields_for_next_job();
+    }
+    ui.same_line();
+    if ui.button("Clear log") {
+        state.log.clear();
+    }
+}
+
+fn ui_combo(ui: &Ui, label: &str, idx: &mut i32, items: &[&str]) -> bool {
+    let mut current = *idx as usize;
+    let changed = ui.combo_simple_string(label, &mut current, items);
+    *idx = current as i32;
+    changed
+}
+
+fn logs_tab(ui: &Ui, state: &mut AppState) {
+    let avail = ui.content_region_avail();
+    ui.input_text_multiline("##log", &mut state.log, [avail[0], avail[1]])
+        .read_only(true)
+        .build();
+}
+
+// ---------------------------------------------------------------------------
+// winit + glutin + glow bootstrap (mirrors the imgui-glow-renderer example)
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::type_complexity)]
+fn create_window(
+    title: &str,
+) -> (
+    EventLoop<()>,
+    Window,
+    Surface<WindowSurface>,
+    PossiblyCurrentContext,
+) {
+    let event_loop = EventLoop::new().unwrap();
+
+    let window_attributes = WindowAttributes::default()
+        .with_title(title)
+        .with_inner_size(LogicalSize::new(1380.0, 920.0));
+    let (window, cfg) = glutin_winit::DisplayBuilder::new()
+        .with_window_attributes(Some(window_attributes))
+        .build(&event_loop, ConfigTemplateBuilder::new(), |mut configs| {
+            configs.next().unwrap()
+        })
+        .expect("Failed to create OpenGL window");
+
+    let window = window.unwrap();
+
+    let context_attribs = ContextAttributesBuilder::new().build(Some(
+        window.window_handle().unwrap().as_raw(),
+    ));
+    let context = unsafe {
+        cfg.display()
+            .create_context(&cfg, &context_attribs)
+            .expect("Failed to create OpenGL context")
+    };
+
+    let surface_attribs = SurfaceAttributesBuilder::<WindowSurface>::new()
+        .with_srgb(Some(true))
+        .build(
+            window.window_handle().unwrap().as_raw(),
+            NonZeroU32::new(1380).unwrap(),
+            NonZeroU32::new(920).unwrap(),
+        );
+    let surface = unsafe {
+        cfg.display()
+            .create_window_surface(&cfg, &surface_attribs)
+            .expect("Failed to create OpenGL surface")
+    };
+
+    let context = context
+        .make_current(&surface)
+        .expect("Failed to make OpenGL context current");
+
+    surface
+        .set_swap_interval(&context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
+        .expect("Failed to set swap interval");
+
+    (event_loop, window, surface, context)
+}
+
+fn glow_context(context: &PossiblyCurrentContext) -> glow::Context {
+    unsafe {
+        glow::Context::from_loader_function_cstr(|s| context.display().get_proc_address(s).cast())
+    }
+}
+
+fn imgui_init(window: &Window) -> (WinitPlatform, imgui::Context) {
+    let mut imgui_context = imgui::Context::create();
+    imgui_context.set_ini_filename(None);
+
+    let mut winit_platform = WinitPlatform::new(&mut imgui_context);
+    winit_platform.attach_window(imgui_context.io_mut(), window, HiDpiMode::Rounded);
+
+    // Try to load a nicer proportional font if available.
+    for candidate in [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    ] {
+        if let Ok(bytes) = fs::read(candidate) {
+            imgui_context.fonts().add_font(&[FontSource::TtfData {
+                data: &bytes,
+                size_pixels: 18.0,
+                config: None,
+            }]);
+            break;
+        }
+    }
+
+    imgui_context.io_mut().font_global_scale = (1.0 / winit_platform.hidpi_factor()) as f32;
+
+    (winit_platform, imgui_context)
+}
+
+fn main() {
+    let (event_loop, window, surface, context) = create_window("NSCB Desktop GUI");
+    let (mut winit_platform, mut imgui_context) = imgui_init(&window);
+
+    let gl = glow_context(&context);
+    let mut renderer = AutoRenderer::new(gl, &mut imgui_context).expect("failed to create renderer");
+
+    let mut state = AppState::default();
+    let mut covers = CoverCache::new();
+    let mut nutdb_index: Option<nscb::nutdb::NutdbIndex> = None;
+    let mut last_frame = Instant::now();
+
+    #[allow(deprecated)]
+    event_loop
+        .run(move |event, window_target| {
+            match event {
+                Event::NewEvents(_) => {
+                    let now = Instant::now();
+                    imgui_context
+                        .io_mut()
+                        .update_delta_time(now.duration_since(last_frame));
+                    last_frame = now;
+                }
+                Event::AboutToWait => {
+                    if let Err(err) =
+                        winit_platform.prepare_frame(imgui_context.io_mut(), &window)
+                    {
+                        eprintln!("prepare_frame failed: {err}");
+                        return;
+                    }
+                    window.request_redraw();
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::RedrawRequested,
+                    ..
+                } => {
+                    // The renderer assumes you'll be clearing the buffer yourself.
+                    unsafe { renderer.gl_context().clear(glow::COLOR_BUFFER_BIT) };
+
+                    // Drain worker events + finished cover downloads.
+                    state.check_worker();
+                    let gl = renderer.gl_context().clone();
+                    covers.reset_for_new_scan(&gl, state.scan_generation, &mut renderer);
+                    covers.poll_uploads(&gl, &mut renderer);
+
+                    // Load NUTDB index lazily for cover art + metadata.
+                    if nutdb_index.is_none() {
+                        nutdb_index = NutdbStore::new(None, None)
+                            .try_load_cached_index()
+                            .ok()
+                            .flatten();
+                    }
+
+                    let ui = imgui_context.frame();
+                    let display = ui.io().display_size;
+                    let index_ref = nutdb_index.as_ref();
+
+                    ui.window("NSCB Desktop GUI")
+                        .size([display[0], display[1]], Condition::Always)
+                        .position([0.0, 0.0], Condition::Always)
+                        .title_bar(false)
+                        .movable(false)
+                        .resizable(false)
+                        .collapsible(false)
+                        .build(|| {
+                            if let Some(_bar) = ui.tab_bar("main_tabs") {
+                                if let Some(_tab) = ui.tab_item("Library") {
+                                    library_tab(ui, &mut state, &mut covers, index_ref);
+                                }
+                                if let Some(_tab) = ui.tab_item("Operations") {
+                                    operations_tab(ui, &mut state);
+                                }
+                                if let Some(_tab) = ui.tab_item("Logs") {
+                                    logs_tab(ui, &mut state);
+                                }
+                            }
+                        });
+
+                    winit_platform.prepare_render(ui, &window);
+                    let draw_data = imgui_context.render();
+
+                    if let Err(err) = renderer.render(draw_data) {
+                        eprintln!("render failed: {err}");
+                        return;
+                    }
+                    if let Err(err) = surface.swap_buffers(&context) {
+                        eprintln!("swap_buffers failed: {err}");
+                    }
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                } => {
+                    window_target.exit();
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::Resized(new_size),
+                    ..
+                } => {
+                    if new_size.width > 0 && new_size.height > 0 {
+                        surface.resize(
+                            &context,
+                            NonZeroU32::new(new_size.width).unwrap(),
+                            NonZeroU32::new(new_size.height).unwrap(),
+                        );
+                    }
+                    winit_platform.handle_event(imgui_context.io_mut(), &window, &event);
+                }
+                event => {
+                    winit_platform.handle_event(imgui_context.io_mut(), &window, &event);
+                }
+            }
+        })
+        .expect("EventLoop error");
 }

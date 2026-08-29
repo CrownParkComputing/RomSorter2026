@@ -9,6 +9,7 @@ mod formats;
 mod keys;
 mod nutdb;
 mod ops;
+mod platform;
 mod util;
 
 fn main() {
