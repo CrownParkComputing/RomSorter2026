@@ -606,12 +606,9 @@ pub fn build_merge_filename(input_paths: &[&str], output_type: &str) -> String {
     let mut dlc_count = 0u32;
     let mut considered_count = 0usize;
 
-    // Regex to extract title ID from filenames like [0100633007D48000] or -0100633007D48000-
     let tid_re = Regex::new(r"[\[-]([0-9A-Fa-f]{16})[\]-]").unwrap();
-    // Regex to extract version: [v458752] in brackets, or --v\d+- in dash format
     let ver_bracket_re = Regex::new(r"\[v(\d+)\]").unwrap();
     let ver_dash_re = Regex::new(r"--v(\d+)-").unwrap();
-    // Regex to detect content type tags
     let upd_re = Regex::new(r"(?i)\[UPD\]").unwrap();
     let dlc_re = Regex::new(r"(?i)\[DLC\]").unwrap();
 
@@ -626,7 +623,6 @@ pub fn build_merge_filename(input_paths: &[&str], output_type: &str) -> String {
             .to_string_lossy()
             .to_string();
 
-        // Extract game name: everything before the first '[' or title ID pattern
         if game_name.is_none() {
             let name = if let Some(bracket_pos) = filename.find('[') {
                 filename[..bracket_pos].trim()
@@ -640,17 +636,11 @@ pub fn build_merge_filename(input_paths: &[&str], output_type: &str) -> String {
             }
         }
 
-        // Extract title IDs
         let title_ids: Vec<String> = tid_re
             .captures_iter(&filename)
-            .map(|c| c[1].to_uppercase())
+            .filter_map(|c| crate::nutdb::normalize_title_id(&c[1]))
             .collect();
 
-        // Determine content type from filename tags or title ID pattern.
-        // Fallback to title-id suffix when explicit tags are missing:
-        // - ...800 => update
-        // - ...000 => base/game
-        // - otherwise => DLC
         let has_update_tid = title_ids.iter().any(|tid| tid.ends_with("800"));
         let has_base_tid = title_ids.iter().any(|tid| tid.ends_with("000"));
         let has_dlc_tid = title_ids
@@ -661,20 +651,13 @@ pub fn build_merge_filename(input_paths: &[&str], output_type: &str) -> String {
         let is_dlc = dlc_re.is_match(&filename) || (!is_update && has_dlc_tid && !has_base_tid);
         let is_base = !is_update && !is_dlc;
 
-        // Title ID heuristic: base ends in 000, update ends in 800, DLC is between
         for tid in &title_ids {
-            if tid.ends_with("000") && base_title_id.is_none() {
-                base_title_id = Some(tid.clone());
-            } else if tid.ends_with("800") && base_title_id.is_none() {
-                // Derive base from update ID: replace last 3 chars with 000
-                let mut base = tid.clone();
-                let len = base.len();
-                base.replace_range(len - 3.., "000");
-                base_title_id = Some(base);
+            let normalized_base = crate::nutdb::base_title_id(tid);
+            if normalized_base != "0000000000000000" && base_title_id.is_none() {
+                base_title_id = Some(normalized_base);
             }
         }
 
-        // Extract version — prefer bracketed [v458752], fall back to --v0-
         let ver_cap = ver_bracket_re
             .captures(&filename)
             .or_else(|| ver_dash_re.captures(&filename));
@@ -690,7 +673,6 @@ pub fn build_merge_filename(input_paths: &[&str], output_type: &str) -> String {
             }
         }
 
-        // Count content types
         if is_update {
             update_count += 1;
         } else if is_dlc {
@@ -700,12 +682,10 @@ pub fn build_merge_filename(input_paths: &[&str], output_type: &str) -> String {
         }
     }
 
-    // Build the filename
     let name = python_title_spacing(&game_name.unwrap_or_else(|| "merged".to_string()));
     let tid = base_title_id.unwrap_or_else(|| "0000000000000000".to_string());
     let ver = latest_version.unwrap_or_else(|| "0".to_string());
 
-    // Build summary like "1G+1U" or "1G+1U+2D"
     let mut parts = Vec::new();
     if game_count > 0 {
         parts.push(format!("{}G", game_count));

@@ -1,4 +1,4 @@
-package com.nscb.android
+package com.simplikfiwed.librarymanager
 
 object NscbBridge {
     init {

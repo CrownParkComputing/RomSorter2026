@@ -5,25 +5,34 @@ plugins {
 }
 
 android {
-    namespace = "com.nscb.android"
+    namespace = "com.simplikfiwed.librarymanager"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.nscb.android"
+        applicationId = "com.simplikfiwed.librarymanager"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 4
+        versionName = "0.1.1"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("release-upload-key.jks")
+            storePassword = "Brooklyn99$$"
+            keyAlias = "upload"
+            keyPassword = "Brooklyn99$$"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

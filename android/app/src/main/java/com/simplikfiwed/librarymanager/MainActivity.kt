@@ -1,4 +1,4 @@
-package com.nscb.android
+package com.simplikfiwed.librarymanager
 
 import android.Manifest
 import android.content.Context
@@ -22,9 +22,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -53,6 +56,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -67,6 +71,8 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
@@ -74,6 +80,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.documentfile.provider.DocumentFile
@@ -100,7 +107,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
+            NscbAppTheme {
                 val viewModel: NscbViewModel = viewModel(
                     factory = object : ViewModelProvider.Factory {
                         override fun <T : ViewModel> create(modelClass: Class<T>, extras: androidx.lifecycle.viewmodel.CreationExtras): T {
@@ -109,7 +116,12 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 )
-                AndroidNscbScreen(viewModel)
+                var showSplash by remember { mutableStateOf(true) }
+                if (showSplash) {
+                    SplashScreen(onDismiss = { showSplash = false })
+                } else {
+                    AndroidNscbScreen(viewModel)
+                }
             }
         }
     }
@@ -261,6 +273,226 @@ data class FaultyFile(
 )
 
 @Composable
+fun NscbAppTheme(content: @Composable () -> Unit) {
+    val colorScheme = darkColorScheme(
+        primary = Color(0xFF8B5CF6),
+        onPrimary = Color.White,
+        primaryContainer = Color(0xFF31215F),
+        onPrimaryContainer = Color(0xFFE9DDFF),
+        secondary = Color(0xFF2DD4BF),
+        onSecondary = Color(0xFF042B27),
+        secondaryContainer = Color(0xFF0E3A37),
+        onSecondaryContainer = Color(0xFFBDF8F0),
+        tertiary = Color(0xFFFFB74D),
+        onTertiary = Color(0xFF2F1B00),
+        tertiaryContainer = Color(0xFF5B3A00),
+        onTertiaryContainer = Color(0xFFFFD9A6),
+        background = Color(0xFF09101C),
+        onBackground = Color(0xFFE6ECF8),
+        surface = Color(0xFF111827),
+        onSurface = Color(0xFFE6ECF8),
+        surfaceVariant = Color(0xFF1A2438),
+        onSurfaceVariant = Color(0xFFB8C4DD),
+        outline = Color(0xFF5A6782),
+        error = Color(0xFFFF6B81),
+        onError = Color.White,
+        errorContainer = Color(0xFF5A1122),
+        onErrorContainer = Color(0xFFFFD9DF)
+    )
+
+    MaterialTheme(colorScheme = colorScheme, typography = MaterialTheme.typography, content = content)
+}
+
+@Composable
+fun SplashScreen(onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(999.dp))
+                )
+                Text(
+                    text = "RomSorter2026",
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Nintendo Switch ROM Manager",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Dark, compact operator layout. Tabs stay focused on setup while the console modal handles the long-running detail.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                    Text("Open Workspace")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ScreenIntroCard(title: String, subtitle: String, accent: Color = MaterialTheme.colorScheme.primary) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(accent, RoundedCornerShape(999.dp))
+            )
+            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+fun SectionCard(
+    title: String,
+    description: String,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(accent, RoundedCornerShape(999.dp))
+            )
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+        }
+    }
+}
+
+@Composable
+fun TwoColumnLayout(
+    modifier: Modifier = Modifier,
+    left: @Composable ColumnScope.() -> Unit,
+    right: @Composable ColumnScope.() -> Unit
+) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        if (maxWidth >= 900.dp) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp), content = left)
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp), content = right)
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp), content = left)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp), content = right)
+            }
+        }
+    }
+}
+
+@Composable
+fun FieldHint(text: String) {
+    Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+fun LabeledValue(
+    label: String,
+    value: String,
+    explanation: String,
+    monospace: Boolean = false,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = if (value.isBlank()) "Not set" else value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (value.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else valueColor,
+            fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default
+        )
+        Text(explanation, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun OptionCard(
+    title: String,
+    description: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Checkbox(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text(description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
 fun AndroidNscbScreen(viewModel: NscbViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -291,6 +523,7 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     var archiveRunning by remember { mutableStateOf(false) }
     var infoRunning by remember { mutableStateOf(false) }
     var settingsRunning by remember { mutableStateOf(false) }
+    var titleDbReady by remember { mutableStateOf(false) }
     val isRunning = mergeRunning || scanRunning || libraryRunning || archiveRunning || infoRunning || settingsRunning
     val mergeInputCount = mergeInputs.lines().count { it.trim().isNotBlank() }
     var showConsoleModal by remember { mutableStateOf(false) }
@@ -304,7 +537,7 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     var pendingDuplicateDeleteDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     var importFolderPaused by remember { mutableStateOf(false) }
     var showPermissionWizard by remember { mutableStateOf(false) }
-    val titleDbCacheDir = remember { File(context.cacheDir, "titledb").absolutePath }
+    val titleDbCacheDir = remember { File(context.filesDir, "titledb").absolutePath }
 
     fun libraryCacheFile() = File(context.filesDir, "library_meta_cache.json")
 
@@ -331,6 +564,147 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
             val entries = JSONObject()
             for ((k, v) in libraryCache) entries.put(k, v)
             libraryCacheFile().writeText(JSONObject().put("version", 1).put("entries", entries).toString())
+        } catch (_: Exception) { }
+    }
+
+    fun librarySnapshotFile() = File(context.filesDir, "library_snapshot_cache.json")
+
+    fun serializeLibraryTitleDetail(detail: LibraryTitleDetail): JSONObject {
+        val obj = JSONObject()
+        obj.put("titleId", detail.titleId)
+        obj.put("titleName", detail.titleName)
+        obj.put("localVersion", detail.localVersion)
+        obj.put("latestVersion", detail.latestVersion ?: JSONObject.NULL)
+        obj.put("releaseDate", detail.releaseDate ?: JSONObject.NULL)
+        obj.put("publisher", detail.publisher ?: JSONObject.NULL)
+        obj.put("description", detail.description ?: JSONObject.NULL)
+        obj.put("imageUrl", detail.imageUrl ?: JSONObject.NULL)
+        obj.put("status", detail.status)
+        val languages = JSONArray()
+        detail.languages.forEach { languages.put(it) }
+        obj.put("languages", languages)
+        val screenshots = JSONArray()
+        detail.screenshotUrls.forEach { screenshots.put(it) }
+        obj.put("screenshotUrls", screenshots)
+        return obj
+    }
+
+    fun deserializeStringList(array: JSONArray?): List<String> {
+        val out = mutableListOf<String>()
+        if (array != null) {
+            for (i in 0 until array.length()) out.add(array.optString(i))
+        }
+        return out
+    }
+
+    fun normalizeLibraryTitleId(titleId: String?): String? {
+        val normalized = titleId?.trim()?.uppercase()?.takeIf { it.length == 16 } ?: return null
+        if (normalized.endsWith("000")) return normalized
+        if (normalized.endsWith("800")) {
+            return normalized.dropLast(3) + "000"
+        }
+        val chars = normalized.toCharArray()
+        val nibble = chars[12].digitToIntOrNull(16) ?: return normalized
+        chars[12] = ((nibble - 1).coerceAtLeast(0)).toString(16).uppercase()[0]
+        chars[13] = '0'
+        chars[14] = '0'
+        chars[15] = '0'
+        return String(chars)
+    }
+
+    fun deserializeLibraryTitleDetail(obj: JSONObject): LibraryTitleDetail {
+        return LibraryTitleDetail(
+            titleId = obj.optString("titleId"),
+            titleName = obj.optString("titleName", "Unknown"),
+            localVersion = obj.optLong("localVersion"),
+            latestVersion = if (obj.isNull("latestVersion")) null else obj.optLong("latestVersion"),
+            releaseDate = if (obj.isNull("releaseDate")) null else obj.optString("releaseDate"),
+            publisher = if (obj.isNull("publisher")) null else obj.optString("publisher"),
+            languages = deserializeStringList(obj.optJSONArray("languages")),
+            description = if (obj.isNull("description")) null else obj.optString("description"),
+            imageUrl = if (obj.isNull("imageUrl")) null else obj.optString("imageUrl"),
+            screenshotUrls = deserializeStringList(obj.optJSONArray("screenshotUrls")),
+            status = obj.optString("status", "unknown")
+        )
+    }
+
+    fun serializeLibraryFile(file: LibraryFile): JSONObject {
+        val obj = JSONObject()
+        obj.put("path", file.path)
+        obj.put("filename", file.filename)
+        obj.put("size", file.size)
+        obj.put("modified", file.modified)
+        obj.put("extension", file.extension)
+        obj.put("titleId", file.titleId ?: JSONObject.NULL)
+        obj.put("titleSummary", file.titleSummary)
+        obj.put("versionSummary", file.versionSummary)
+        obj.put("versionStatus", file.versionStatus)
+        obj.put("imageUrl", file.imageUrl ?: JSONObject.NULL)
+        val details = JSONArray()
+        file.details.forEach { details.put(serializeLibraryTitleDetail(it)) }
+        obj.put("details", details)
+        return obj
+    }
+
+    fun deserializeLibraryFile(obj: JSONObject): LibraryFile {
+        val details = mutableListOf<LibraryTitleDetail>()
+        val arr = obj.optJSONArray("details")
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                details.add(deserializeLibraryTitleDetail(arr.getJSONObject(i)))
+            }
+        }
+        return LibraryFile(
+            path = obj.optString("path"),
+            filename = obj.optString("filename"),
+            size = obj.optLong("size"),
+            modified = obj.optLong("modified"),
+            extension = obj.optString(
+                "extension",
+                obj.optString("filename").substringBefore('?').substringAfterLast('/', obj.optString("filename")).substringAfterLast('.', "").uppercase()
+            ),
+            titleId = normalizeLibraryTitleId(if (obj.isNull("titleId")) null else obj.optString("titleId")),
+            titleSummary = obj.optString("titleSummary", "Not checked"),
+            versionSummary = obj.optString("versionSummary"),
+            versionStatus = obj.optString("versionStatus", "unknown"),
+            imageUrl = if (obj.isNull("imageUrl")) null else obj.optString("imageUrl"),
+            details = details
+        )
+    }
+
+    fun currentLibrarySourceKey(): String {
+        return if (viewModel.outputFolderUri.isNotBlank()) {
+            "saf:${viewModel.outputFolderUri}"
+        } else {
+            "fs:${viewModel.outputDirectory}"
+        }
+    }
+
+    fun loadLibrarySnapshot(): List<LibraryFile> {
+        val file = librarySnapshotFile()
+        if (!file.exists()) return emptyList()
+        return try {
+            val obj = JSONObject(file.readText())
+            if (obj.optString("sourceKey") != currentLibrarySourceKey()) return emptyList()
+            val arr = obj.optJSONArray("items") ?: return emptyList()
+            val out = mutableListOf<LibraryFile>()
+            for (i in 0 until arr.length()) out.add(deserializeLibraryFile(arr.getJSONObject(i)))
+            out
+        } catch (_: Exception) { emptyList() }
+    }
+
+    fun saveLibrarySnapshot(items: List<LibraryFile>) {
+        try {
+            val arr = JSONArray()
+            items.forEach { arr.put(serializeLibraryFile(it)) }
+            librarySnapshotFile().writeText(
+                JSONObject()
+                    .put("version", 1)
+                    .put("sourceKey", currentLibrarySourceKey())
+                    .put("savedAt", System.currentTimeMillis())
+                    .put("items", arr)
+                    .toString()
+            )
         } catch (_: Exception) { }
     }
 
@@ -400,18 +774,29 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     fun buildLibraryFileFromCache(base: LibraryFile): LibraryFile? {
         val entry = libraryCache[base.path] ?: return null
         if (entry.optLong("size") != base.size || entry.optLong("modified") != base.modified) return null
-        if (entry.optBoolean("hasError", false)) {
-            return base.copy(titleSummary = entry.optString("titleSummary", "Cache error"), versionStatus = "error")
+        val titleRawJson = entry.optString("titleRawJson", entry.optString("rawJson", ""))
+        val versionRawJson = entry.optString("versionRawJson", "")
+        if (entry.optBoolean("versionHasError", false)) {
+            return base.copy(
+                titleSummary = entry.optString("titleSummary", base.titleSummary),
+                versionSummary = entry.optString("versionSummary", base.versionSummary),
+                versionStatus = "error"
+            )
         }
-        val rawJson = entry.optString("rawJson", "")
-        if (rawJson.isBlank()) return null
-        return parseLibraryStatusJson(rawJson, base)
+        if (versionRawJson.isNotBlank()) {
+            return parseLibraryStatusJson(versionRawJson, base)
+        }
+        if (entry.optBoolean("titleHasError", false) || entry.optBoolean("hasError", false)) {
+            return base.copy(titleSummary = entry.optString("titleSummary", "Cache error"), versionStatus = base.versionStatus)
+        }
+        if (titleRawJson.isBlank()) return null
+        return parseLibraryStatusJson(titleRawJson, base)
     }
 
     fun extractTitleIdFromFilename(fileName: String): String? {
         val re = Regex("[\\[-]([0-9A-Fa-f]{16})[\\]-]")
         val stem = File(fileName).nameWithoutExtension
-        return re.find(stem)?.groupValues?.get(1)?.uppercase()
+        return normalizeLibraryTitleId(re.find(stem)?.groupValues?.get(1))
     }
 
     fun extractLocalVersionFromFilename(fileName: String): Long {
@@ -424,19 +809,22 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     }
 
     fun lookupLibraryTitlesBatch(files: List<LibraryFile>): Map<String, LibraryTitleDetail> {
-        val ids = files.mapNotNull { it.titleId ?: extractTitleIdFromFilename(it.filename) }.distinct().filter { it.length == 16 }
+        val ids = files.mapNotNull { normalizeLibraryTitleId(it.titleId) ?: extractTitleIdFromFilename(it.filename) }.distinct().filter { it.length == 16 }
         if (ids.isEmpty()) return emptyMap()
         val raw = try {
             NscbBridge.titleDbLookupBatch(ids.joinToString("\n"), titleDbCacheDir)
         } catch (_: Exception) { "" }
-        if (raw.isBlank() || raw.startsWith("ERROR")) return emptyMap()
+        if (raw.isBlank() || raw.startsWith("ERROR")) {
+            Log.i(NSCB_LOG_TAG, "TitlesDB batch lookup returned no data for ${ids.size} title id(s): ${raw.ifBlank { "blank response" }}")
+            return emptyMap()
+        }
         val out = mutableMapOf<String, LibraryTitleDetail>()
         try {
             val json = JSONObject(raw)
             val arr = json.getJSONArray("results")
             for (i in 0 until arr.length()) {
                 val item = arr.getJSONObject(i)
-                val tid = item.getString("title_id")
+                val tid = normalizeLibraryTitleId(item.getString("title_id")) ?: continue
                 val name = item.optString("title_name", "Unknown")
                 val latest = if (item.isNull("latest_version")) null else item.getLong("latest_version")
                 val releaseDate = if (item.isNull("release_date")) null else item.getString("release_date")
@@ -472,9 +860,9 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     }
 
     fun buildLibraryFileFromBatch(base: LibraryFile, fromFilenameTid: String?, dbMap: Map<String, LibraryTitleDetail>): LibraryFile {
-        val tid = base.titleId ?: fromFilenameTid ?: return base
+        val tid = normalizeLibraryTitleId(base.titleId) ?: normalizeLibraryTitleId(fromFilenameTid) ?: return base
         val db = dbMap[tid] ?: return base
-        val localVersion = base.titleId?.let { extractLocalVersionFromFilename(base.filename) } ?: 0
+        val localVersion = extractLocalVersionFromFilename(base.filename)
         val status = when {
             db.latestVersion != null && db.latestVersion > localVersion -> "outdated"
             db.latestVersion != null -> "current"
@@ -515,16 +903,47 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
         return jo.toString()
     }
 
-    fun putLibraryCacheEntry(path: String, size: Long, modified: Long, raw: String?, hasError: Boolean = false, titleSummary: String = "") {
-        val entry = JSONObject()
+    fun putLibraryCacheEntry(
+        path: String,
+        size: Long,
+        modified: Long,
+        raw: String?,
+        hasError: Boolean = false,
+        titleSummary: String = "",
+        versionSummary: String = "",
+        cacheKind: String = if (hasError) "version_error" else "version"
+    ) {
+        val entry = libraryCache[path] ?: JSONObject()
         entry.put("size", size)
         entry.put("modified", modified)
-        if (hasError) {
-            entry.put("hasError", true)
-            entry.put("titleSummary", titleSummary)
-        } else if (raw != null) {
-            entry.put("rawJson", raw)
+        when (cacheKind) {
+            "title" -> {
+                entry.remove("titleHasError")
+                entry.put("titleSummary", titleSummary)
+                if (raw != null) entry.put("titleRawJson", raw)
+            }
+            "title_error" -> {
+                entry.put("titleHasError", true)
+                entry.put("titleSummary", titleSummary)
+                if (raw != null) entry.put("titleRawJson", raw)
+            }
+            "version_error" -> {
+                entry.put("versionHasError", true)
+                entry.put("titleSummary", titleSummary)
+                entry.put("versionSummary", versionSummary)
+            }
+            else -> {
+                entry.remove("versionHasError")
+                if (raw != null) entry.put("versionRawJson", raw)
+                entry.put("titleSummary", titleSummary)
+                entry.put("versionSummary", versionSummary)
+            }
         }
+        if (entry.has("rawJson") && !entry.has("titleRawJson")) {
+            entry.put("titleRawJson", entry.optString("rawJson"))
+            entry.remove("rawJson")
+        }
+        entry.remove("hasError")
         libraryCache[path] = entry
     }
 
@@ -550,6 +969,23 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     fun setProgress(message: String) {
         progressStatus = message
         appendLog(message)
+    }
+
+    suspend fun ensureTitlesDbReady(reason: String, forceRefresh: Boolean = false): Boolean {
+        if (titleDbReady && !forceRefresh) return true
+        val result = withContext(Dispatchers.IO) {
+            runCatching { NscbBridge.refreshTitleDb(titleDbCacheDir) }
+                .getOrElse { "ERROR: ${it.message}" }
+        }
+        flushRustLogs()
+        return if (result.startsWith("ERROR")) {
+            appendLog("TitlesDB unavailable during $reason: $result")
+            false
+        } else {
+            titleDbReady = true
+            appendLog("TitlesDB ready during $reason: $result")
+            true
+        }
     }
 
     fun hasPersistedTreePermission(uriString: String, needsWrite: Boolean): Boolean {
@@ -652,7 +1088,7 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     }
     fun ensureFileOperationStorage() {
         configureNativeTempRoot()
-        File(context.cacheDir, "titledb").mkdirs()
+        File(titleDbCacheDir).mkdirs()
         if (usesSafOutputFolder()) {
             require(hasPersistedTreePermission(viewModel.outputFolderUri, true)) {
                 "Output folder permission is not available. Re-pick the output folder and try again."
@@ -1402,14 +1838,14 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
         }
     }
 
-    val pickSingleInput = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val pickSingleInput = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             singleFileInput = uri.toString()
             output = "File selected"
         }
     }
 
-    val pickArchiveInput = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val pickArchiveInput = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             archiveInput = uri.toString()
             val name = uri.path?.substringAfterLast('/')?.substringBeforeLast('.') ?: "converted"
@@ -1813,6 +2249,7 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
 
     suspend fun refreshLibrary() {
         val existingByPath = libraryFiles.associateBy { it.path }
+        val snapshotByPath = loadLibrarySnapshot().associateBy { it.path }
         withContext(Dispatchers.IO) {
             val mapped = mutableListOf<LibraryFile>()
             if (usesSafOutputFolder()) {
@@ -1821,21 +2258,29 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                 withContext(Dispatchers.Main) {
                     setProgress("Loading library from ${viewModel.outputDirectory} (${docs.size} file(s))")
                 }
-                for ((index, doc) in docs.withIndex()) {
+                for (doc in docs) {
                     val path = doc.uri.toString()
                     val name = doc.name ?: doc.uri.lastPathSegment ?: "file"
                     val size = doc.length()
                     val modified = doc.lastModified()
-                    val existing = existingByPath[path]
-                    val cached = existing?.let { buildLibraryFileFromCache(it) }
-                    if (cached != null) {
-                        mapped.add(cached)
-                        continue
-                    }
-                    val tid = extractTitleIdFromFilename(name)
-                    val fresh = existing?.takeIf { it.size == size && it.modified == modified }
-                        ?: LibraryFile(path = path, filename = name, size = size, modified = modified, extension = extensionForPath(name).uppercase(), titleId = tid)
-                    mapped.add(fresh)
+                    val currentBase = existingByPath[path]?.takeIf { it.size == size && it.modified == modified }
+                    val snapshot = snapshotByPath[path]?.takeIf { it.size == size && it.modified == modified }
+                    val base = currentBase ?: snapshot ?: LibraryFile(
+                        path = path,
+                        filename = name,
+                        size = size,
+                        modified = modified,
+                        extension = extensionForPath(name).uppercase(),
+                        titleId = extractTitleIdFromFilename(name)
+                    )
+                    val cached = buildLibraryFileFromCache(base)
+                    mapped.add(cached ?: base.copy(
+                        filename = name,
+                        size = size,
+                        modified = modified,
+                        extension = extensionForPath(name).uppercase(),
+                        titleId = base.titleId ?: extractTitleIdFromFilename(name)
+                    ))
                 }
             } else {
                 val dir = File(viewModel.outputDirectory)
@@ -1845,33 +2290,51 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                 withContext(Dispatchers.Main) {
                     setProgress("Loading library from ${viewModel.outputDirectory} (${files.size} file(s))")
                 }
-                for ((index, file) in files.withIndex()) {
+                for (file in files) {
                     val path = file.absolutePath
-                    val existing = existingByPath[path]
-                    val cached = existing?.let { buildLibraryFileFromCache(it) }
-                    if (cached != null) {
-                        mapped.add(cached)
-                        continue
-                    }
-                    val tid = extractTitleIdFromFilename(file.name)
-                    val fresh = existing?.takeIf { it.size == file.length() && it.modified == file.lastModified() }
-                        ?: LibraryFile(path = path, filename = file.name, size = file.length(), modified = file.lastModified(), extension = extensionForPath(file.name).uppercase(), titleId = tid)
-                    mapped.add(fresh)
+                    val size = file.length()
+                    val modified = file.lastModified()
+                    val currentBase = existingByPath[path]?.takeIf { it.size == size && it.modified == modified }
+                    val snapshot = snapshotByPath[path]?.takeIf { it.size == size && it.modified == modified }
+                    val base = currentBase ?: snapshot ?: LibraryFile(
+                        path = path,
+                        filename = file.name,
+                        size = size,
+                        modified = modified,
+                        extension = extensionForPath(file.name).uppercase(),
+                        titleId = extractTitleIdFromFilename(file.name)
+                    )
+                    val cached = buildLibraryFileFromCache(base)
+                    mapped.add(cached ?: base.copy(
+                        filename = file.name,
+                        size = size,
+                        modified = modified,
+                        extension = extensionForPath(file.name).uppercase(),
+                        titleId = normalizeLibraryTitleId(base.titleId) ?: extractTitleIdFromFilename(file.name)
+                    ))
                 }
             }
 
-            // Fast filename-based batch titleDb enrichment for files not already cached/resolved
             val withoutMeta = mapped.filter { it.titleId != null && (it.titleSummary == "Not checked" || it.titleSummary == "No title metadata found") }
             if (withoutMeta.isNotEmpty()) {
                 withContext(Dispatchers.Main) { setProgress("Resolving ${withoutMeta.size} title(s) from filename...") }
                 val dbMap = lookupLibraryTitlesBatch(withoutMeta)
                 for (i in mapped.indices) {
                     val file = mapped[i]
-                    if (file.titleId != null && (file.titleSummary == "Not checked" || file.titleSummary == "No title metadata found")) {
-                        val enriched = buildLibraryFileFromBatch(file, file.titleId, dbMap)
+                    val normalizedTid = normalizeLibraryTitleId(file.titleId)
+                    if (normalizedTid != null && (file.titleSummary == "Not checked" || file.titleSummary == "No title metadata found")) {
+                        val enriched = buildLibraryFileFromBatch(file, normalizedTid, dbMap)
                         if (enriched.imageUrl != null || enriched.titleSummary != file.titleSummary) {
-                            putLibraryCacheEntry(file.path, file.size, file.modified,
-                                buildSyntheticLibraryStatusJson(enriched), false, enriched.titleSummary)
+                            putLibraryCacheEntry(
+                                file.path,
+                                file.size,
+                                file.modified,
+                                buildSyntheticLibraryStatusJson(enriched),
+                                false,
+                                enriched.titleSummary,
+                                enriched.versionSummary,
+                                cacheKind = "title"
+                            )
                         }
                         mapped[i] = enriched
                     }
@@ -1884,6 +2347,13 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                 libraryFiles.addAll(mapped)
                 setProgress("Library loaded: ${mapped.size} file(s)")
             }
+            val activePaths = mapped.map { it.path }.toSet()
+            val stalePaths = libraryCache.keys.filter { it !in activePaths }
+            if (stalePaths.isNotEmpty()) {
+                stalePaths.forEach { libraryCache.remove(it) }
+                saveLibraryCache()
+            }
+            saveLibrarySnapshot(mapped)
         }
     }
 
@@ -1896,13 +2366,15 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
             }
         }
         libraryFiles.removeAll { it.path == path }
+        libraryCache.remove(path)
+        saveLibraryCache()
+        saveLibrarySnapshot(libraryFiles.toList())
         appendLog("Deleted library file: ${File(path).name}")
     }
 
     suspend fun checkLibraryVersions() {
         if (viewModel.keysPath.isBlank()) {
-            output = "ERROR: prod.keys path is required. Go to Settings."
-            selectedTabIndex = 5
+            appendLog("Skipping deep library version verification because prod.keys is not configured. Cached filename and TitlesDB matches remain available.")
             return
         }
         // Phase 1: restore from cache
@@ -1923,11 +2395,19 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                 val filesToResolve = uncached.map { it.second }
                 val dbMap = lookupLibraryTitlesBatch(filesToResolve)
                 for ((idx, file) in uncached) {
-                    val tid = file.titleId ?: extractTitleIdFromFilename(file.filename)
+                    val tid = normalizeLibraryTitleId(file.titleId) ?: extractTitleIdFromFilename(file.filename)
                     if (tid != null && dbMap[tid] != null) {
                         val enriched = buildLibraryFileFromBatch(file, tid, dbMap)
-                        putLibraryCacheEntry(file.path, file.size, file.modified,
-                            buildSyntheticLibraryStatusJson(enriched), false, enriched.titleSummary)
+                        putLibraryCacheEntry(
+                            file.path,
+                            file.size,
+                            file.modified,
+                            buildSyntheticLibraryStatusJson(enriched),
+                            false,
+                            enriched.titleSummary,
+                            enriched.versionSummary,
+                            cacheKind = "title"
+                        )
                         libraryFiles[idx] = enriched
                     }
                 }
@@ -1945,11 +2425,30 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                     val file = libraryFiles[idx]
                     val raw = NscbBridge.libraryStatus(file.path, viewModel.keysPath, titleDbCacheDir)
                     val updated = if (raw.startsWith("ERROR")) {
-                        putLibraryCacheEntry(file.path, file.size, file.modified, null, true, raw)
-                        file.copy(titleSummary = raw, versionStatus = "error")
+                        putLibraryCacheEntry(
+                            file.path,
+                            file.size,
+                            file.modified,
+                            null,
+                            true,
+                            file.titleSummary,
+                            raw,
+                            cacheKind = "version_error"
+                        )
+                        file.copy(titleSummary = file.titleSummary, versionSummary = raw, versionStatus = "error")
                     } else {
-                        putLibraryCacheEntry(file.path, file.size, file.modified, raw, false)
-                        parseLibraryStatusJson(raw, file)
+                        val parsed = parseLibraryStatusJson(raw, file)
+                        putLibraryCacheEntry(
+                            file.path,
+                            file.size,
+                            file.modified,
+                            raw,
+                            false,
+                            parsed.titleSummary,
+                            parsed.versionSummary,
+                            cacheKind = "version"
+                        )
+                        parsed
                     }
                     libraryFiles[idx] = updated
                 }
@@ -2282,7 +2781,10 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
             if (!usesSafOutputFolder()) {
                 File(viewModel.outputDirectory).mkdirs()
             }
+            setProgress("Loading TitlesDB...")
+            ensureTitlesDbReady("startup")
             refreshLibrary()
+            progressStatus = "Idle"
         } else {
             showPermissionWizard = true
         }
@@ -2295,9 +2797,14 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
             progressStatus = "Loading library..."
             startLogPolling()
             try {
+                ensureTitlesDbReady("library load")
                 refreshLibrary()
                 if (libraryFiles.isNotEmpty()) {
-                    checkLibraryVersions()
+                    if (viewModel.keysPath.isNotBlank()) {
+                        checkLibraryVersions()
+                    } else {
+                        appendLog("Skipping deep library version verification because prod.keys is not configured. Showing filename + TitlesDB matches only.")
+                    }
                 }
                 output = "Loaded ${libraryFiles.size} output file(s)."
             } catch (e: Exception) {
@@ -2398,13 +2905,8 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                         hasPersistedTreePermission(viewModel.outputFolderUri, true) -> "granted"
                         else -> "set (tap Continue to use)"
                     }
-                        val allFilesStatus = when {
-                            Build.VERSION.SDK_INT < Build.VERSION_CODES.R -> "n/a"
-                            Environment.isExternalStorageManager() -> "allowed"
-                            else -> "denied"
-                        }
-                        Text("Import folder: $importStatus")
-                        Text("Game library folder: $outputStatus")
+                    Text("Import folder: $importStatus")
+                    Text("Game library folder: $outputStatus")
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { pickScanFolder.launch(null) }, enabled = !isRunning) {
                                 Text("Pick Import Folder")
@@ -2589,477 +3091,562 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(6.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         TabRow(selectedTabIndex = selectedTabIndex) {
             Tab(selected = selectedTabIndex == 0, enabled = !isRunning, onClick = { selectedTabIndex = 0 }) {
-                Text("Merge", modifier = Modifier.padding(3.dp), style = MaterialTheme.typography.labelSmall)
+                Text("Merge", modifier = Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
             Tab(selected = selectedTabIndex == 1, enabled = !isRunning, onClick = { selectedTabIndex = 1 }) {
-                Text("Info", modifier = Modifier.padding(3.dp), style = MaterialTheme.typography.labelSmall)
+                Text("Info", modifier = Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
             Tab(selected = selectedTabIndex == 2, enabled = !isRunning, onClick = { selectedTabIndex = 2 }) {
-                Text("Scan", modifier = Modifier.padding(3.dp), style = MaterialTheme.typography.labelSmall)
+                Text("Scan", modifier = Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
             Tab(selected = selectedTabIndex == 3, enabled = !isRunning, onClick = { selectedTabIndex = 3 }) {
-                Text("Zip", modifier = Modifier.padding(3.dp), style = MaterialTheme.typography.labelSmall)
+                Text("NSZ/XCZ", modifier = Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
             Tab(selected = selectedTabIndex == 4, enabled = !isRunning, onClick = { selectedTabIndex = 4 }) {
-                Text("Library", modifier = Modifier.padding(3.dp), style = MaterialTheme.typography.labelSmall)
+                Text("Library", modifier = Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
             Tab(selected = selectedTabIndex == 5, enabled = !isRunning, onClick = { selectedTabIndex = 5 }) {
-                Text("Settings", modifier = Modifier.padding(3.dp), style = MaterialTheme.typography.labelSmall)
+                Text("Settings", modifier = Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
         }
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (selectedTabIndex) {
                 0 -> {
-                    // Merge Tab
                     Column(
                         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text(if (mergeInputCount <= 1) "Package Input" else "Merge Inputs")
-                        Text("Import Folder: ${viewModel.lastScanPath}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
-                        OutlinedTextField(
-                            value = mergeInputs,
-                            onValueChange = { mergeInputs = it },
-                            label = { Text("Input URIs (one per line)") },
-                            modifier = Modifier.fillMaxWidth().height(120.dp),
+                        ScreenIntroCard(
+                            title = "Merge + Import",
+                            subtitle = "Compact setup here, long-running detail in the console modal. Use one pane for sources and one for output controls.",
+                            accent = MaterialTheme.colorScheme.primary
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { pickMergeInputs.launch(arrayOf("*/*")) }, enabled = !mergeRunning) {
-                                Text("Pick package files")
-                            }
-                            Button(
-                                onClick = { loadImportFolderIntoMergeInputs() },
-                                enabled = !mergeRunning && viewModel.lastScanUri.isNotBlank(),
-                            ) {
-                                Text("Load Import Folder")
-                            }
-                        }
-                        Button(
-                            onClick = {
-                                requireKeysOrError {
-                                    progressStatus = "Starting bulk import"
-                                    output = "Preparing import folder scan..."
-                                    scope.launch {
-                                        mergeRunning = true
-                                        importFolderPaused = false
-                                        startLogPolling()
-                                        progressStatus = "Importing from folder..."
-                                        runCatching {
-                                            importFolderScanAndBulkImport()
-                                        }.onFailure {
-                                            progressStatus = "Failed"
-                                            output = "ERROR: ${it.message}"
+                        TwoColumnLayout(
+                            left = {
+                                SectionCard(
+                                    title = "Input selection",
+                                    description = "Pick package files directly or pull everything from the configured import folder. Each line in the field below is treated as one source.",
+                                    accent = MaterialTheme.colorScheme.primary
+                                ) {
+                                    LabeledValue(
+                                        label = "Import folder",
+                                        value = viewModel.lastScanPath,
+                                        explanation = "This folder is reused by Load Import Folder and Scan + Bulk Import.",
+                                        monospace = true
+                                    )
+                                    OutlinedTextField(
+                                        value = mergeInputs,
+                                        onValueChange = { mergeInputs = it },
+                                        label = { Text("Package list (one URI or path per line)") },
+                                        modifier = Modifier.fillMaxWidth().height(170.dp),
+                                    )
+                                    FieldHint("Paste or stage multiple items here. The merge page stays lean while the console modal shows parsing and merge progress.")
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(onClick = { pickMergeInputs.launch(arrayOf("*/*")) }, enabled = !mergeRunning, modifier = Modifier.weight(1f)) {
+                                            Text("Pick package files")
                                         }
-                                        if (progressStatus != "Failed" && !importFolderPaused) {
-                                            progressStatus = "Completed"
+                                        Button(
+                                            onClick = { loadImportFolderIntoMergeInputs() },
+                                            enabled = !mergeRunning && viewModel.lastScanUri.isNotBlank(),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Load import folder")
                                         }
-                                        if (importFolderPaused) {
-                                            progressStatus = "Paused"
-                                        }
-                                        importFolderPaused = false
-                                        mergeRunning = false
                                     }
+                                    FieldHint("Pick package files adds manual sources. Load import folder converts the currently selected SAF folder into a ready-to-run source list.")
+                                    Button(
+                                        onClick = {
+                                            requireKeysOrError {
+                                                progressStatus = "Starting bulk import"
+                                                output = "Preparing import folder scan..."
+                                                scope.launch {
+                                                    mergeRunning = true
+                                                    importFolderPaused = false
+                                                    startLogPolling()
+                                                    progressStatus = "Importing from folder..."
+                                                    runCatching {
+                                                        importFolderScanAndBulkImport()
+                                                    }.onFailure {
+                                                        progressStatus = "Failed"
+                                                        output = "ERROR: ${it.message}"
+                                                    }
+                                                    if (progressStatus != "Failed" && !importFolderPaused) {
+                                                        progressStatus = "Completed"
+                                                    }
+                                                    if (importFolderPaused) {
+                                                        progressStatus = "Paused"
+                                                    }
+                                                    importFolderPaused = false
+                                                    mergeRunning = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !mergeRunning && viewModel.lastScanUri.isNotBlank() && viewModel.outputDirectory.isNotBlank(),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Scan + Bulk Import Folder")
+                                    }
+                                    FieldHint("Bulk import scans the import folder, filters faults and duplicates, then writes directly into the output library.")
                                 }
                             },
-                            enabled = !mergeRunning && viewModel.lastScanUri.isNotBlank() && viewModel.outputDirectory.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Scan + Bulk Import Folder")
-                        }
-                        OutlinedTextField(
-                            value = mergeOutputName,
-                            onValueChange = { mergeOutputName = it },
-                            label = { Text("Output file name") },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Text("Output: ${viewModel.outputDirectory}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { mergeType = "nsp" }, enabled = !mergeRunning) { Text("NSP") }
-                            Button(onClick = { mergeType = "xci" }, enabled = !mergeRunning) { Text("XCI") }
-                            Text("Type: ${mergeType.uppercase()}")
-                        }
-                        Button(
-                            onClick = {
-                                requireKeysOrError {
-                                    scope.launch {
-                                        mergeRunning = true
-                                        startLogPolling()
-                                        runCatching {
-                                            val inputs = mergeInputs.split("\n").map { it.trim() }.filter { it.isNotBlank() }
-                                            val selectedFaulty = faultyFiles.map { it.path }.toSet().let { bad -> inputs.filter { it in bad } }
-                                            if (selectedFaulty.isNotEmpty()) {
-                                                promptFaultyDelete(selectedFaulty, "merge")
-                                                error("Merge stopped because ${selectedFaulty.size} faulty file(s) are selected.")
-                                            }
-                                            val name = mergeOutputName.trim().ifEmpty { "merged_output" }
-                                            val ext = extForMergeType(mergeType)
-                                            val fileName = if (inputs.size == 1) {
-                                                filenameForSingleImport(inputs.first(), name)
-                                            } else if (name.lowercase().endsWith(".$ext")) {
-                                                name
-                                            } else {
-                                                "$name.$ext"
-                                            }
-                                            val outputPath = uniqueOutputPath(fileName)
-                                            output = runMergeToPath(inputs, outputPath)
-                                            refreshLibrary()
-                                        }.onFailure {
-                                            progressStatus = "Failed"
-                                            output = "ERROR: ${it.message}"
-                                            if (isOutputPermissionError(it)) showPermissionWizard = true
-                                        }
-                                        if (progressStatus != "Failed") {
-                                            progressStatus = "Completed"
-                                        }
-                                        mergeRunning = false
+                            right = {
+                                SectionCard(
+                                    title = "Output controls",
+                                    description = "Keep the final packaging choices here. Settings owns the actual library folder; this page only decides naming and container type.",
+                                    accent = MaterialTheme.colorScheme.secondary
+                                ) {
+                                    LabeledValue(
+                                        label = "Output library",
+                                        value = viewModel.outputDirectory,
+                                        explanation = "Configured in Settings. Merge/import actions write into this folder.",
+                                        monospace = true
+                                    )
+                                    OutlinedTextField(
+                                        value = mergeOutputName,
+                                        onValueChange = { mergeOutputName = it },
+                                        label = { Text("Output file name / stem") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                    FieldHint("For one input package, metadata can still promote a cleaner suggested name. For multi-file merges, this is the visible stem.")
+                                    Text("Output container", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Button(onClick = { mergeType = "nsp" }, enabled = !mergeRunning, modifier = Modifier.weight(1f)) { Text("NSP") }
+                                        Button(onClick = { mergeType = "xci" }, enabled = !mergeRunning, modifier = Modifier.weight(1f)) { Text("XCI") }
                                     }
+                                    FieldHint("NSP is the usual packaged output. XCI is the cart-style container when you explicitly want that format.")
+                                    Button(
+                                        onClick = {
+                                            requireKeysOrError {
+                                                scope.launch {
+                                                    mergeRunning = true
+                                                    startLogPolling()
+                                                    runCatching {
+                                                        val inputs = mergeInputs.split("\n").map { it.trim() }.filter { it.isNotBlank() }
+                                                        val selectedFaulty = faultyFiles.map { it.path }.toSet().let { bad -> inputs.filter { it in bad } }
+                                                        if (selectedFaulty.isNotEmpty()) {
+                                                            promptFaultyDelete(selectedFaulty, "merge")
+                                                            error("Merge stopped because ${selectedFaulty.size} faulty file(s) are selected.")
+                                                        }
+                                                        val name = mergeOutputName.trim().ifEmpty { "merged_output" }
+                                                        val ext = extForMergeType(mergeType)
+                                                        val fileName = if (inputs.size == 1) {
+                                                            filenameForSingleImport(inputs.first(), name)
+                                                        } else if (name.lowercase().endsWith(".$ext")) {
+                                                            name
+                                                        } else {
+                                                            "$name.$ext"
+                                                        }
+                                                        val outputPath = uniqueOutputPath(fileName)
+                                                        output = runMergeToPath(inputs, outputPath)
+                                                        refreshLibrary()
+                                                    }.onFailure {
+                                                        progressStatus = "Failed"
+                                                        output = "ERROR: ${it.message}"
+                                                        if (isOutputPermissionError(it)) showPermissionWizard = true
+                                                    }
+                                                    if (progressStatus != "Failed") {
+                                                        progressStatus = "Completed"
+                                                    }
+                                                    mergeRunning = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !mergeRunning && mergeInputs.isNotBlank(),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(if (mergeInputCount <= 1) "Import / Repack to Output Library" else "Run Merge to Output Library")
+                                    }
+                                    FieldHint("Run merge uses the staged package list above and writes straight to the configured output library. Watch the console modal for filename decisions and progress.")
                                 }
-                            },
-                            enabled = !mergeRunning && mergeInputs.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(if (mergeInputCount <= 1) "Import/Repack to Output Library" else "Run Merge to Output Library")
-                        }
+                            }
+                        )
                     }
                 }
                 1 -> {
-                    // Info Tab
                     Column(
                         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("File Info / Content Summary")
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = singleFileInput,
-                                onValueChange = { singleFileInput = it },
-                                label = { Text("Input URI or Local Path") },
-                                modifier = Modifier.weight(1f),
-                            )
-                            Button(onClick = { pickSingleInput.launch(arrayOf("*/*")) }, enabled = !infoRunning) {
-                                Text("Pick")
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    requireKeysOrError {
-                                        scope.launch {
-                                            infoRunning = true
-                                            progressStatus = "Analyzing..."
-                                            runCatching {
-                                                val localPath = importUriToCache(Uri.parse(singleFileInput), "info_input")
-                                                val result = withContext(Dispatchers.IO) { NscbBridge.fileList(localPath, viewModel.keysPath) }
-                                                deleteIfAppCachePath(localPath)
-                                                output = result
-                                            }.onFailure {
-                                                output = "ERROR: ${it.message}"
-                                            }
-                                            infoRunning = false
-                                        }
+                        ScreenIntroCard(
+                            title = "Inspect Package",
+                            subtitle = "Use this page when you want a quick metadata or content read without leaving the main operator flow.",
+                            accent = MaterialTheme.colorScheme.tertiary
+                        )
+                        TwoColumnLayout(
+                            left = {
+                                SectionCard(
+                                    title = "Target file",
+                                    description = "Point at one package URI or one local path. This page is intentionally compact because the console modal holds the verbose output.",
+                                    accent = MaterialTheme.colorScheme.tertiary
+                                ) {
+                                    OutlinedTextField(
+                                        value = singleFileInput,
+                                        onValueChange = { singleFileInput = it },
+                                        label = { Text("Input file URI or local path") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                    FieldHint("Pick from SAF or paste a local path. Use this for one-off inspection instead of building a full merge list.")
+                                    Button(onClick = { pickSingleInput.launch("*/*") }, enabled = !infoRunning, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Pick target file")
                                     }
-                                },
-                                enabled = !infoRunning && singleFileInput.isNotBlank(),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text("Show Info")
-                            }
-                            Button(
-                                onClick = {
-                                    requireKeysOrError {
-                                        scope.launch {
-                                            infoRunning = true
-                                            progressStatus = "Analyzing..."
-                                            runCatching {
-                                                val localPath = importUriToCache(Uri.parse(singleFileInput), "content_input")
-                                                val result = withContext(Dispatchers.IO) { NscbBridge.contentList(localPath, viewModel.keysPath) }
-                                                deleteIfAppCachePath(localPath)
-                                                output = result
-                                            }.onFailure {
-                                                output = "ERROR: ${it.message}"
+                                    FieldHint("The picker writes the selected URI back into the field so you can rerun either action without re-picking.")
+                                }
+                            },
+                            right = {
+                                SectionCard(
+                                    title = "Read actions",
+                                    description = "Choose whether you want high-level package metadata or the inner content listing. Both results stream into the console view below.",
+                                    accent = MaterialTheme.colorScheme.primary
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            requireKeysOrError {
+                                                scope.launch {
+                                                    infoRunning = true
+                                                    progressStatus = "Analyzing..."
+                                                    runCatching {
+                                                        val localPath = importUriToCache(Uri.parse(singleFileInput), "info_input")
+                                                        val result = withContext(Dispatchers.IO) { NscbBridge.fileList(localPath, viewModel.keysPath) }
+                                                        deleteIfAppCachePath(localPath)
+                                                        output = result
+                                                    }.onFailure {
+                                                        output = "ERROR: ${it.message}"
+                                                    }
+                                                    infoRunning = false
+                                                }
                                             }
-                                            infoRunning = false
-                                        }
+                                        },
+                                        enabled = !infoRunning && singleFileInput.isNotBlank(),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Show package info")
                                     }
-                                },
-                                enabled = !infoRunning && singleFileInput.isNotBlank(),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text("Show Content")
+                                    FieldHint("Show package info returns the top-level metadata summary you usually want before import or merge.")
+                                    Button(
+                                        onClick = {
+                                            requireKeysOrError {
+                                                scope.launch {
+                                                    infoRunning = true
+                                                    progressStatus = "Analyzing..."
+                                                    runCatching {
+                                                        val localPath = importUriToCache(Uri.parse(singleFileInput), "content_input")
+                                                        val result = withContext(Dispatchers.IO) { NscbBridge.contentList(localPath, viewModel.keysPath) }
+                                                        deleteIfAppCachePath(localPath)
+                                                        output = result
+                                                    }.onFailure {
+                                                        output = "ERROR: ${it.message}"
+                                                    }
+                                                    infoRunning = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !infoRunning && singleFileInput.isNotBlank(),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Show package content")
+                                    }
+                                    FieldHint("Show package content lists the inner members and is the better choice when you are checking exactly what sits inside a file.")
+                                }
                             }
-                        }
+                        )
                     }
                 }
                 2 -> {
-                    // Scanner Tab
-                    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Game Library: ${viewModel.outputDirectory}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
-                        Button(
-                            onClick = {
-                                requireKeysOrError {
-                                    scope.launch {
-                                        scanRunning = true
-                                        startLogPolling()
-                                        verifyAndRenameLibrary()
-                                        progressStatus = "Idle"
-                                        scanRunning = false
+                    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ScreenIntroCard(
+                            title = "Scanner + Library QA",
+                            subtitle = "Use this page to verify the output library, surface duplicates and faults, then queue or run merges with as little scrolling as possible.",
+                            accent = MaterialTheme.colorScheme.secondary
+                        )
+                        TwoColumnLayout(
+                            left = {
+                                SectionCard(
+                                    title = "Library actions",
+                                    description = "The scanner works against the configured output library. Use it as your cleanup and batch-merge control surface.",
+                                    accent = MaterialTheme.colorScheme.secondary
+                                ) {
+                                    LabeledValue(
+                                        label = "Game library",
+                                        value = viewModel.outputDirectory,
+                                        explanation = "This is the folder being verified and renamed.",
+                                        monospace = true
+                                    )
+                                    Button(
+                                        onClick = {
+                                            requireKeysOrError {
+                                                scope.launch {
+                                                    scanRunning = true
+                                                    startLogPolling()
+                                                    verifyAndRenameLibrary()
+                                                    progressStatus = "Idle"
+                                                    scanRunning = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !scanRunning && viewModel.outputDirectory.isNotBlank(),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Verify + Rename Game Library")
+                                    }
+                                    FieldHint("This scans the configured output library, validates packages, and normalizes names where possible.")
+                                    Button(
+                                        onClick = {
+                                            requireKeysOrError {
+                                                scope.launch {
+                                                    mergeRunning = true
+                                                    cancelBulkAfterCurrent = false
+                                                    startLogPolling()
+                                                    progressStatus = "Bulk merging..."
+                                                    runCatching {
+                                                        ensureFileOperationStorage()
+                                                        withContext(Dispatchers.IO) { clearMergeTempCache() }
+                                                        if (!usesSafOutputFolder()) {
+                                                            File(viewModel.outputDirectory).mkdirs()
+                                                        }
+                                                        if (faultyFiles.isNotEmpty()) {
+                                                            promptFaultyDelete(faultyFiles.map { it.path }, "bulk merge")
+                                                        }
+                                                        val groupsToMerge = scanResults
+                                                            .filter { bestMergeFilesForGroup(it).size > 1 }
+                                                            .filter { group ->
+                                                                val badPaths = faultyFiles.map { it.path }.toSet()
+                                                                bestMergeFilesForGroup(group).none { it.path in badPaths }
+                                                            }
+                                                        if (groupsToMerge.isEmpty()) {
+                                                            error("No mergeable groups found with the current filters.")
+                                                        }
+                                                        var mergedCount = 0
+                                                        val failedGroups = mutableListOf<String>()
+                                                        val logLines = mutableListOf("Bulk merge started: ${groupsToMerge.size} group(s)")
+                                                        appendLog("Bulk merge started: ${groupsToMerge.size} group(s)")
+                                                        for ((index, group) in groupsToMerge.withIndex()) {
+                                                            val bestFiles = bestMergeFilesForGroup(group)
+                                                            val paths = bestFiles.map { it.path }
+                                                            val localPaths = bestFiles.map { ensureNativeReadable(it.path, "bulk_merge_input") }
+                                                            val pathsJoined = localPaths.joinToString("\n")
+                                                            try {
+                                                                requireReadableFiles(localPaths, "Merge input")
+                                                                progressStatus = "Merging ${index + 1}/${groupsToMerge.size}: ${group.titleName}"
+                                                                appendLog("Merging ${index + 1}/${groupsToMerge.size}: ${group.titleName} (${paths.size} file(s))")
+                                                                logLines.add("Merging ${index + 1}/${groupsToMerge.size}: ${group.titleName} (${paths.size} file(s))")
+                                                                output = logLines.joinToString("\n")
+                                                                val suggested = withContext(Dispatchers.IO) {
+                                                                    NscbBridge.getSuggestedFileName(pathsJoined, viewModel.keysPath, titleDbCacheDir, mergeType)
+                                                                }
+                                                                val outputPath = uniqueOutputPath(suggested)
+                                                                val tempOutputPath = prepareTempOutput(outputPath)
+                                                                appendLog("Output: $outputPath")
+                                                                logLines.add("Output: $outputPath")
+                                                                output = logLines.joinToString("\n")
+                                                                val result = withContext(Dispatchers.IO) {
+                                                                    NscbBridge.merge(pathsJoined, tempOutputPath, viewModel.keysPath, mergeType)
+                                                                }
+                                                                if (!result.startsWith("OK")) {
+                                                                    File(tempOutputPath).delete()
+                                                                    val inputList = paths.joinToString("\n")
+                                                                    failedGroups.add("${group.titleName}: $result\n$inputList")
+                                                                    appendLog("FAILED: ${group.titleName}: $result")
+                                                                    logLines.add("FAILED: ${group.titleName}: $result")
+                                                                    logLines.add(inputList)
+                                                                    output = logLines.joinToString("\n")
+                                                                    if (cancelBulkAfterCurrent) {
+                                                                        logLines.add("Stopped after current group.")
+                                                                        break
+                                                                    }
+                                                                    continue
+                                                                }
+                                                                var completedSize = 0L
+                                                                var outputCheckFailed = false
+                                                                try {
+                                                                    completedSize = requireCompletedOutput(tempOutputPath, localPaths)
+                                                                    finalizeTempOutput(tempOutputPath, outputPath)
+                                                                } catch (err: Throwable) {
+                                                                    File(tempOutputPath).delete()
+                                                                    val inputList = paths.joinToString("\n")
+                                                                    failedGroups.add("${group.titleName}: ${err.message}\n$inputList")
+                                                                    appendLog("FAILED: ${group.titleName}: ${err.message}")
+                                                                    logLines.add("FAILED: ${group.titleName}: ${err.message}")
+                                                                    logLines.add(inputList)
+                                                                    output = logLines.joinToString("\n")
+                                                                    outputCheckFailed = true
+                                                                }
+                                                                if (outputCheckFailed) {
+                                                                    if (cancelBulkAfterCurrent) {
+                                                                        logLines.add("Stopped after current group.")
+                                                                        break
+                                                                    }
+                                                                    continue
+                                                                }
+                                                                if (viewModel.deleteSourcesAfterMerge) {
+                                                                    deleteLocalSourceFiles(paths)
+                                                                    appendLog("Deleted ${paths.distinct().size} source file(s).")
+                                                                    logLines.add("Deleted ${paths.distinct().size} source file(s).")
+                                                                }
+                                                                mergedCount += 1
+                                                                appendLog("OK: ${group.titleName} (${formatSize(completedSize)})")
+                                                                logLines.add("OK: ${group.titleName} (${formatSize(completedSize)})")
+                                                                output = logLines.joinToString("\n")
+                                                                refreshLibrary()
+                                                                if (cancelBulkAfterCurrent) {
+                                                                    logLines.add("Stopped after current group.")
+                                                                    break
+                                                                }
+                                                            } finally {
+                                                                localPaths.forEach { p -> deleteIfAppCachePath(p) }
+                                                            }
+                                                        }
+                                                        progressStatus = "Completed"
+                                                        val summary = if (failedGroups.isEmpty()) {
+                                                            "Bulk merged $mergedCount group(s) into ${viewModel.outputDirectory}"
+                                                        } else {
+                                                            "Bulk merged $mergedCount group(s), skipped ${failedGroups.size} failed group(s).\n" +
+                                                                failedGroups.take(5).joinToString("\n")
+                                                        }
+                                                        output = (logLines + summary).joinToString("\n")
+                                                        performScan()
+                                                    }.onFailure {
+                                                        progressStatus = "Failed"
+                                                        output = "ERROR: ${it.message}"
+                                                    }
+                                                    cancelBulkAfterCurrent = false
+                                                    mergeRunning = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !mergeRunning && scanResults.any { bestMergeFilesForGroup(it).size > 1 },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Bulk Merge Library")
+                                    }
+                                    FieldHint("Bulk merge walks every mergeable scan group. Use the console modal for per-group output and cancellation state.")
+                                    if (mergeRunning && progressStatus.startsWith("Merging")) {
+                                        Button(
+                                            onClick = {
+                                                cancelBulkAfterCurrent = true
+                                                output = output + "\nCancel requested. Bulk merge will stop after the current group."
+                                            },
+                                            enabled = !cancelBulkAfterCurrent,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                        ) {
+                                            Text(if (cancelBulkAfterCurrent) "Cancel Pending" else "Cancel After Current")
+                                        }
+                                        FieldHint("Cancel After Current is safe-mode cancellation. It lets the current group finish cleanly before stopping the batch.")
                                     }
                                 }
                             },
-                            enabled = !scanRunning && viewModel.outputDirectory.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Verify + Rename Game Library")
-                        }
-                        Button(
-                            onClick = {
-                                requireKeysOrError {
-                                    scope.launch {
-                                        mergeRunning = true
-                                        cancelBulkAfterCurrent = false
-                                        startLogPolling()
-                                        progressStatus = "Bulk merging..."
-                                        runCatching {
-                                            ensureFileOperationStorage()
-                                            withContext(Dispatchers.IO) { clearMergeTempCache() }
-                                            if (!usesSafOutputFolder()) {
-                                                File(viewModel.outputDirectory).mkdirs()
-                                            }
-                                            if (faultyFiles.isNotEmpty()) {
-                                                promptFaultyDelete(faultyFiles.map { it.path }, "bulk merge")
-                                            }
-                                            val groupsToMerge = scanResults
-                                                .filter { bestMergeFilesForGroup(it).size > 1 }
-                                                .filter { group ->
-                                                    val badPaths = faultyFiles.map { it.path }.toSet()
-                                                    bestMergeFilesForGroup(group).none { it.path in badPaths }
-                                                }
-                                            if (groupsToMerge.isEmpty()) {
-                                                error("No mergeable groups found with the current filters.")
-                                            }
-                                            var mergedCount = 0
-                                            val failedGroups = mutableListOf<String>()
-                                            val logLines = mutableListOf("Bulk merge started: ${groupsToMerge.size} group(s)")
-                                            appendLog("Bulk merge started: ${groupsToMerge.size} group(s)")
-                                            for ((index, group) in groupsToMerge.withIndex()) {
-                                                val bestFiles = bestMergeFilesForGroup(group)
-                                                val paths = bestFiles.map { it.path }
-                                                val localPaths = bestFiles.map { ensureNativeReadable(it.path, "bulk_merge_input") }
-                                                val pathsJoined = localPaths.joinToString("\n")
-                                                try {
-                                                    requireReadableFiles(localPaths, "Merge input")
-                                                    progressStatus = "Merging ${index + 1}/${groupsToMerge.size}: ${group.titleName}"
-                                                    appendLog("Merging ${index + 1}/${groupsToMerge.size}: ${group.titleName} (${paths.size} file(s))")
-                                                    logLines.add("Merging ${index + 1}/${groupsToMerge.size}: ${group.titleName} (${paths.size} file(s))")
-                                                    output = logLines.joinToString("\n")
-                                                    val suggested = withContext(Dispatchers.IO) {
-                                                        NscbBridge.getSuggestedFileName(pathsJoined, viewModel.keysPath, titleDbCacheDir, mergeType)
-                                                    }
-                                                    val outputPath = uniqueOutputPath(suggested)
-                                                    val tempOutputPath = prepareTempOutput(outputPath)
-                                                    appendLog("Output: $outputPath")
-                                                    logLines.add("Output: $outputPath")
-                                                    output = logLines.joinToString("\n")
-                                                    val result = withContext(Dispatchers.IO) {
-                                                        NscbBridge.merge(pathsJoined, tempOutputPath, viewModel.keysPath, mergeType)
-                                                    }
-                                                    if (!result.startsWith("OK")) {
-                                                        File(tempOutputPath).delete()
-                                                        val inputList = paths.joinToString("\n")
-                                                        failedGroups.add("${group.titleName}: $result\n$inputList")
-                                                        appendLog("FAILED: ${group.titleName}: $result")
-                                                        logLines.add("FAILED: ${group.titleName}: $result")
-                                                        logLines.add(inputList)
-                                                        output = logLines.joinToString("\n")
-                                                        if (cancelBulkAfterCurrent) {
-                                                            logLines.add("Stopped after current group.")
-                                                            break
-                                                        }
-                                                        continue
-                                                    }
-                                                    var completedSize = 0L
-                                                    var outputCheckFailed = false
-                                                    try {
-                                                        completedSize = requireCompletedOutput(tempOutputPath, localPaths)
-                                                        finalizeTempOutput(tempOutputPath, outputPath)
-                                                    } catch (err: Throwable) {
-                                                        File(tempOutputPath).delete()
-                                                        val inputList = paths.joinToString("\n")
-                                                        failedGroups.add("${group.titleName}: ${err.message}\n$inputList")
-                                                        appendLog("FAILED: ${group.titleName}: ${err.message}")
-                                                        logLines.add("FAILED: ${group.titleName}: ${err.message}")
-                                                        logLines.add(inputList)
-                                                        output = logLines.joinToString("\n")
-                                                        outputCheckFailed = true
-                                                    }
-                                                    if (outputCheckFailed) {
-                                                        if (cancelBulkAfterCurrent) {
-                                                            logLines.add("Stopped after current group.")
-                                                            break
-                                                        }
-                                                        continue
-                                                    }
-                                                    if (viewModel.deleteSourcesAfterMerge) {
+                            right = {
+                                SectionCard(
+                                    title = "Findings summary",
+                                    description = "The scanner highlights duplicates and faulty files here first so you can clean them up before running more work.",
+                                    accent = MaterialTheme.colorScheme.error
+                                ) {
+                                    if (duplicateLibraryPaths.isEmpty() && faultyFiles.isEmpty()) {
+                                        Text("No duplicates or faulty files are currently flagged.", style = MaterialTheme.typography.bodyMedium)
+                                        FieldHint("Run Verify + Rename or refresh the library scan to repopulate this summary.")
+                                    }
+                                    if (duplicateLibraryPaths.isNotEmpty()) {
+                                        Text("Duplicate copies found: ${duplicateLibraryPaths.size}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                        duplicateLibraryPaths.take(6).forEach { path ->
+                                            Text(displayNameForRef(path), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                                        }
+                                        if (duplicateLibraryPaths.size > 6) {
+                                            FieldHint("Showing first 6 duplicates. The full list remains visible in the scanner result flow.")
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(
+                                                onClick = {
+                                                    scope.launch {
+                                                        scanRunning = true
+                                                        progressStatus = "Deleting duplicate copies..."
+                                                        val paths = duplicateLibraryPaths.toList()
                                                         deleteLocalSourceFiles(paths)
-                                                        appendLog("Deleted ${paths.distinct().size} source file(s).")
-                                                        logLines.add("Deleted ${paths.distinct().size} source file(s).")
+                                                        duplicateLibraryPaths.clear()
+                                                        performScan()
+                                                        scanRunning = false
                                                     }
-                                                    mergedCount += 1
-                                                    appendLog("OK: ${group.titleName} (${formatSize(completedSize)})")
-                                                    logLines.add("OK: ${group.titleName} (${formatSize(completedSize)})")
-                                                    output = logLines.joinToString("\n")
-                                                    refreshLibrary()
-                                                    if (cancelBulkAfterCurrent) {
-                                                        logLines.add("Stopped after current group.")
-                                                        break
+                                                },
+                                                enabled = !scanRunning,
+                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Delete duplicates")
+                                            }
+                                            Button(
+                                                onClick = { duplicateLibraryPaths.clear() },
+                                                enabled = !scanRunning,
+                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Ignore")
+                                            }
+                                        }
+                                        FieldHint("Delete duplicates removes the extra library copies listed above. Ignore just clears the warning state.")
+                                    }
+                                    if (faultyFiles.isNotEmpty()) {
+                                        Text("Faulty files found: ${faultyFiles.size}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                        faultyFiles.take(6).forEach { file ->
+                                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                Text(file.filename, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                                                Text(file.reason, style = MaterialTheme.typography.labelSmall)
+                                            }
+                                        }
+                                        if (faultyFiles.size > 6) {
+                                            FieldHint("Showing first 6 faulty files. Use the scan list and console output if you need the full detail.")
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(
+                                                onClick = {
+                                                    scope.launch {
+                                                        scanRunning = true
+                                                        progressStatus = "Deleting faulty files..."
+                                                        val paths = faultyFiles.map { it.path }
+                                                        deleteLocalSourceFiles(paths)
+                                                        faultyFiles.clear()
+                                                        performScan()
+                                                        scanRunning = false
                                                     }
-                                                } finally {
-                                                    localPaths.forEach { p -> deleteIfAppCachePath(p) }
-                                                }
+                                                },
+                                                enabled = !scanRunning,
+                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Delete faulty")
                                             }
-                                            progressStatus = "Completed"
-                                            val summary = if (failedGroups.isEmpty()) {
-                                                "Bulk merged $mergedCount group(s) into ${viewModel.outputDirectory}"
-                                            } else {
-                                                "Bulk merged $mergedCount group(s), skipped ${failedGroups.size} failed group(s).\n" +
-                                                    failedGroups.take(5).joinToString("\n")
+                                            Button(
+                                                onClick = { faultyFiles.clear() },
+                                                enabled = !scanRunning,
+                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Ignore")
                                             }
-                                            output = (logLines + summary).joinToString("\n")
-                                            performScan()
-                                        }.onFailure {
-                                            progressStatus = "Failed"
-                                            output = "ERROR: ${it.message}"
                                         }
-                                        cancelBulkAfterCurrent = false
-                                        mergeRunning = false
-                                    }
-                                }
-                            },
-                            enabled = !mergeRunning && scanResults.any { bestMergeFilesForGroup(it).size > 1 },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("Bulk Merge Library")
-                        }
-                        if (mergeRunning && progressStatus.startsWith("Merging")) {
-                            Button(
-                                onClick = {
-                                    cancelBulkAfterCurrent = true
-                                    output = output + "\nCancel requested. Bulk merge will stop after the current group."
-                                },
-                                enabled = !cancelBulkAfterCurrent,
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Text(if (cancelBulkAfterCurrent) "Cancel Pending" else "Cancel After Current")
-                            }
-                        }
-                        if (duplicateLibraryPaths.isNotEmpty()) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("Duplicate copies found: ${duplicateLibraryPaths.size}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                    duplicateLibraryPaths.take(20).forEach { path ->
-                                        Text(
-                                            displayNameForRef(path),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    }
-                                    if (duplicateLibraryPaths.size > 20) {
-                                        Text("Showing first 20 duplicate files.", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(
-                                            onClick = {
-                                                scope.launch {
-                                                    scanRunning = true
-                                                    progressStatus = "Deleting duplicate copies..."
-                                                    val paths = duplicateLibraryPaths.toList()
-                                                    deleteLocalSourceFiles(paths)
-                                                    duplicateLibraryPaths.clear()
-                                                    performScan()
-                                                    scanRunning = false
-                                                }
-                                            },
-                                            enabled = !scanRunning,
-                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                                        ) {
-                                            Text("Delete Duplicate Copies")
-                                        }
-                                        Button(
-                                            onClick = { duplicateLibraryPaths.clear() },
-                                            enabled = !scanRunning,
-                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        ) {
-                                            Text("Ignore")
-                                        }
+                                        FieldHint("Delete faulty removes the flagged bad sources. Ignore keeps the files but clears the summary warning.")
                                     }
                                 }
                             }
-                        }
-
-                        if (faultyFiles.isNotEmpty()) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("Faulty files found: ${faultyFiles.size}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                    faultyFiles.take(20).forEach { file ->
-                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            Text(file.filename, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
-                                            Text(file.reason, style = MaterialTheme.typography.labelSmall)
-                                            Text(file.path, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onErrorContainer)
-                                        }
-                                    }
-                                    if (faultyFiles.size > 20) {
-                                        Text("Showing first 20 faulty files.", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(
-                                            onClick = {
-                                                scope.launch {
-                                                    scanRunning = true
-                                                    progressStatus = "Deleting faulty files..."
-                                                    val paths = faultyFiles.map { it.path }
-                                                    deleteLocalSourceFiles(paths)
-                                                    faultyFiles.clear()
-                                                    performScan()
-                                                    scanRunning = false
-                                                }
-                                            },
-                                            enabled = !scanRunning,
-                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                                        ) {
-                                            Text("Delete Faulty Files")
-                                        }
-                                        Button(
-                                            onClick = { faultyFiles.clear() },
-                                            enabled = !scanRunning,
-                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        ) {
-                                            Text("Ignore")
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        )
 
                         if (scanResults.isNotEmpty()) {
-                            LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Scanned groups", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Each card groups files by base title. Older versions and exact duplicates are tinted so you can delete or merge with less hunting.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(scanResults) { group ->
-                                    ScanGroupCard(group, 
+                                    ScanGroupCard(
+                                        group,
                                         onMergeRequest = {
                                             val bestFiles = bestMergeFilesForGroup(group)
-                                            
                                             val pathsJoined = bestFiles.joinToString("\n") { it.path }
                                             mergeInputs = pathsJoined
                                             scope.launch {
@@ -3124,291 +3711,375 @@ fun AndroidNscbScreen(viewModel: NscbViewModel) {
                                 }
                             }
                         } else {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("No results. Configure path in Settings and Scan.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                Text("No results yet. Configure the output library in Settings, then run Verify + Rename Game Library.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
                 }
                 3 -> {
-                    // Compress / Decompress Tab
                     Column(
                         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("Compress / Decompress")
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Button(onClick = { archiveMode = "compress"; archiveOutputUri = null }, enabled = !archiveRunning) {
-                                Text("Compress")
-                            }
-                            Button(onClick = { archiveMode = "decompress"; archiveOutputUri = null }, enabled = !archiveRunning) {
-                                Text("Decompress")
-                            }
-                            Text("Mode: ${archiveMode.replaceFirstChar { it.uppercase() }}")
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                value = archiveInput,
-                                onValueChange = { archiveInput = it },
-                                label = { Text("Input URI or Local Path") },
-                                modifier = Modifier.weight(1f),
-                                singleLine = true
-                            )
-                            Button(onClick = { pickArchiveInput.launch(arrayOf("*/*")) }, enabled = !archiveRunning) {
-                                Text("Pick")
-                            }
-                        }
-                        OutlinedTextField(
-                            value = archiveOutputName,
-                            onValueChange = {
-                                archiveOutputName = it
-                                archiveOutputUri = null
-                            },
-                            label = { Text("Output file name") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                        ScreenIntroCard(
+                            title = "NSZ / XCZ",
+                            subtitle = "Compression and decompression are split into input and output panes so you can see the full path without losing the action controls.",
+                            accent = MaterialTheme.colorScheme.tertiary
                         )
-                        if (archiveMode == "compress") {
-                            OutlinedTextField(
-                                value = archiveLevel,
-                                onValueChange = { archiveLevel = it.filter { ch -> ch.isDigit() }.take(2) },
-                                label = { Text("Compression level 1-22") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Button(
-                                onClick = {
-                                    val ext = archiveOutputExt(archiveInput, archiveMode)
-                                    pickArchiveOutput.launch(outputNameWithExt(archiveOutputName, ext))
-                                },
-                                enabled = !archiveRunning && archiveInput.isNotBlank()
-                            ) {
-                                Text("Pick output destination")
-                            }
-                            if (archiveOutputUri != null) {
-                                Text("Ready", color = Color(0xFF2E7D32), style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                        Button(
-                            onClick = {
-                                val runAction: () -> Unit = {
-                                    if (archiveOutputUri == null) {
-                                        val ext = archiveOutputExt(archiveInput, archiveMode)
-                                        pickArchiveOutput.launch(outputNameWithExt(archiveOutputName, ext))
-                                        output = "Please select where to save the output file..."
-                                    } else {
-                                        scope.launch {
-                                        archiveRunning = true
-                                        startLogPolling()
-                                        var localInput: String? = null
-                                        var temporaryArchiveOutput: String? = null
-                                        runCatching {
-                                            configureNativeTempRoot()
-                                            val inputUri = Uri.parse(archiveInput)
-                                            progressStatus = "Importing input..."
-                                            localInput = importUriToCache(inputUri, "archive_input")
-                                            val destinationUri = requireNotNull(archiveOutputUri)
-                                            val directOutputPath = writableFilePathForUri(destinationUri)
-                                            val archiveOutputPath = directOutputPath ?: File(operationTempRoot(), outputNameWithExt(archiveOutputName, archiveOutputExt(archiveInput, archiveMode))).absolutePath
-                                            if (directOutputPath == null) {
-                                                temporaryArchiveOutput = archiveOutputPath
-                                            }
-                                            progressStatus = if (archiveMode == "compress") "Compressing..." else "Decompressing..."
-                                            val result = withContext(Dispatchers.IO) {
-                                                if (archiveMode == "compress") {
-                                                    val level = archiveLevel.toIntOrNull()?.coerceIn(1, 22) ?: 3
-                                                    NscbBridge.compress(requireNotNull(localInput), archiveOutputPath, viewModel.keysPath, level)
-                                                } else {
-                                                    NscbBridge.decompress(requireNotNull(localInput), archiveOutputPath)
-                                                }
-                                            }
-                                            if (result.startsWith("OK")) {
-                                                if (directOutputPath == null) {
-                                                    progressStatus = "Writing to destination..."
-                                                    copyLocalFileToUri(archiveOutputPath, destinationUri)
-                                                    File(archiveOutputPath).delete()
-                                                    temporaryArchiveOutput = null
-                                                }
-                                                progressStatus = "Completed"
-                                                output = "$result\nSaved successfully to chosen destination."
-                                            } else {
-                                                progressStatus = "Failed"
-                                                output = result
-                                            }
-                                        }.onFailure {
-                                            progressStatus = "Failed"
-                                            output = "ERROR: ${it.message}"
+                        TwoColumnLayout(
+                            left = {
+                                SectionCard(
+                                    title = "Input + mode",
+                                    description = "Choose whether you are compressing or decompressing first, then point to the single source file to process.",
+                                    accent = MaterialTheme.colorScheme.tertiary
+                                ) {
+                                    Text("Mode", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Button(onClick = { archiveMode = "compress"; archiveOutputUri = null }, enabled = !archiveRunning, modifier = Modifier.weight(1f)) {
+                                            Text("Compress")
                                         }
-                                        localInput?.let { deleteIfAppCachePath(it) }
-                                        temporaryArchiveOutput?.let { File(it).delete() }
-                                        archiveRunning = false
+                                        Button(onClick = { archiveMode = "decompress"; archiveOutputUri = null }, enabled = !archiveRunning, modifier = Modifier.weight(1f)) {
+                                            Text("Decompress")
                                         }
                                     }
-                                }
-                                if (archiveMode == "compress") {
-                                    requireKeysOrError(runAction)
-                                } else {
-                                    runAction()
+                                    FieldHint("Compress produces NSZ/XCZ outputs. Decompress expands them back to the usual source container.")
+                                    OutlinedTextField(
+                                        value = archiveInput,
+                                        onValueChange = { archiveInput = it },
+                                        label = { Text("Input file URI or local path") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+                                    FieldHint("Use a SAF-picked URI or a local path. This page is for one file at a time so the result stays predictable.")
+                                    Button(onClick = { pickArchiveInput.launch("*/*") }, enabled = !archiveRunning, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Pick source file")
+                                    }
                                 }
                             },
-                            enabled = !archiveRunning && archiveInput.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(if (archiveMode == "compress") "Run Compress" else "Run Decompress")
-                        }
+                            right = {
+                                SectionCard(
+                                    title = "Output setup",
+                                    description = "Name the output, optionally tune compression level, and choose the destination file before running.",
+                                    accent = MaterialTheme.colorScheme.primary
+                                ) {
+                                    OutlinedTextField(
+                                        value = archiveOutputName,
+                                        onValueChange = {
+                                            archiveOutputName = it
+                                            archiveOutputUri = null
+                                        },
+                                        label = { Text("Output file name / stem") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+                                    FieldHint("Changing the output name clears the current destination so you cannot accidentally write a mismatched filename.")
+                                    if (archiveMode == "compress") {
+                                        OutlinedTextField(
+                                            value = archiveLevel,
+                                            onValueChange = { archiveLevel = it.filter { ch -> ch.isDigit() }.take(2) },
+                                            label = { Text("Compression level (1-22)") },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            singleLine = true
+                                        )
+                                        FieldHint("Lower values are faster. Higher values chase smaller files at the cost of more CPU time.")
+                                    }
+                                    LabeledValue(
+                                        label = "Destination status",
+                                        value = if (archiveOutputUri != null) "Ready" else "Not selected",
+                                        explanation = "Pick output destination chooses where the converted file is written.",
+                                        valueColor = if (archiveOutputUri != null) Color(0xFF2DD4BF) else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Button(
+                                        onClick = {
+                                            val ext = archiveOutputExt(archiveInput, archiveMode)
+                                            pickArchiveOutput.launch(outputNameWithExt(archiveOutputName, ext))
+                                        },
+                                        enabled = !archiveRunning && archiveInput.isNotBlank(),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Pick output destination")
+                                    }
+                                    FieldHint("The save picker is explicit on purpose so you always see where the converted file will land.")
+                                    Button(
+                                        onClick = {
+                                            val runAction: () -> Unit = {
+                                                if (archiveOutputUri == null) {
+                                                    val ext = archiveOutputExt(archiveInput, archiveMode)
+                                                    pickArchiveOutput.launch(outputNameWithExt(archiveOutputName, ext))
+                                                    output = "Please select where to save the output file..."
+                                                } else {
+                                                    scope.launch {
+                                                        archiveRunning = true
+                                                        startLogPolling()
+                                                        var localInput: String? = null
+                                                        var temporaryArchiveOutput: String? = null
+                                                        runCatching {
+                                                            configureNativeTempRoot()
+                                                            val inputUri = Uri.parse(archiveInput)
+                                                            progressStatus = "Importing input..."
+                                                            localInput = importUriToCache(inputUri, "archive_input")
+                                                            val destinationUri = requireNotNull(archiveOutputUri)
+                                                            val directOutputPath = writableFilePathForUri(destinationUri)
+                                                            val archiveOutputPath = directOutputPath ?: File(operationTempRoot(), outputNameWithExt(archiveOutputName, archiveOutputExt(archiveInput, archiveMode))).absolutePath
+                                                            if (directOutputPath == null) {
+                                                                temporaryArchiveOutput = archiveOutputPath
+                                                            }
+                                                            progressStatus = if (archiveMode == "compress") "Compressing..." else "Decompressing..."
+                                                            val result = withContext(Dispatchers.IO) {
+                                                                if (archiveMode == "compress") {
+                                                                    val level = archiveLevel.toIntOrNull()?.coerceIn(1, 22) ?: 3
+                                                                    NscbBridge.compress(requireNotNull(localInput), archiveOutputPath, viewModel.keysPath, level)
+                                                                } else {
+                                                                    NscbBridge.decompress(requireNotNull(localInput), archiveOutputPath)
+                                                                }
+                                                            }
+                                                            if (result.startsWith("OK")) {
+                                                                if (directOutputPath == null) {
+                                                                    progressStatus = "Writing to destination..."
+                                                                    copyLocalFileToUri(archiveOutputPath, destinationUri)
+                                                                    File(archiveOutputPath).delete()
+                                                                    temporaryArchiveOutput = null
+                                                                }
+                                                                progressStatus = "Completed"
+                                                                output = "$result\nSaved successfully to chosen destination."
+                                                            } else {
+                                                                progressStatus = "Failed"
+                                                                output = result
+                                                            }
+                                                        }.onFailure {
+                                                            progressStatus = "Failed"
+                                                            output = "ERROR: ${it.message}"
+                                                        }
+                                                        localInput?.let { deleteIfAppCachePath(it) }
+                                                        temporaryArchiveOutput?.let { File(it).delete() }
+                                                        archiveRunning = false
+                                                    }
+                                                }
+                                            }
+                                            if (archiveMode == "compress") {
+                                                requireKeysOrError(runAction)
+                                            } else {
+                                                runAction()
+                                            }
+                                        },
+                                        enabled = !archiveRunning && archiveInput.isNotBlank(),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(if (archiveMode == "compress") "Run Compress" else "Run Decompress")
+                                    }
+                                    FieldHint("The console modal shows every stage: import, conversion, destination copy, and final success/failure state.")
+                                }
+                            }
+                        )
                     }
                 }
                 4 -> {
-                    // Library Tab
-                    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Library", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("Game Library", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "${libraryFiles.size} loaded game(s)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (viewModel.outputDirectory.isNotBlank()) {
+                                    Text(
+                                        text = viewModel.outputDirectory,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(start = 12.dp)
+                                    )
+                                }
+                            }
                         }
-                        Text(viewModel.outputDirectory, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
                         if (libraryFiles.isEmpty()) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("No output files found.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "No output files found in the configured output library.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         } else {
-                            LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(libraryFiles) { file ->
-                                    LibraryFileCard(
-                                        file = file,
-                                        formatSize = ::formatSize,
-                                        formatModified = ::formatModified,
-                                        onDeleteRequest = { path ->
-                                            scope.launch {
-                                                libraryRunning = true
-                                                progressStatus = "Deleting..."
-                                                deleteLibraryFile(path)
-                                                progressStatus = "Idle"
-                                                libraryRunning = false
-                                            }
-                                        }
-                                    )
+                            items(
+                                items = libraryFiles.chunked(2),
+                                key = { row -> row.joinToString("|") { it.path } }
+                            ) { row ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    row.forEach { file ->
+                                        LibraryFileCard(
+                                            file = file,
+                                            formatSize = ::formatSize,
+                                            formatModified = ::formatModified,
+                                            onDeleteRequest = { path ->
+                                                scope.launch {
+                                                    libraryRunning = true
+                                                    progressStatus = "Deleting..."
+                                                    deleteLibraryFile(path)
+                                                    progressStatus = "Idle"
+                                                    libraryRunning = false
+                                                }
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    if (row.size < 2) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 5 -> {
-                    // Settings Tab
                     Column(
                         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("App Configuration", style = MaterialTheme.typography.titleMedium)
-                        
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Keys (prod.keys)", style = MaterialTheme.typography.labelMedium)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                OutlinedTextField(
-                                    value = viewModel.keysPath,
-                                    onValueChange = { viewModel.updateKeysPath(it) },
-                                    label = { Text("Local Path") },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true
-                                )
-                                Button(onClick = { pickKeys.launch(arrayOf("*/*")) }, enabled = !settingsRunning) {
-                                    Text("Pick")
-                                }
-                            }
-                        }
-
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Import Folder", style = MaterialTheme.typography.labelMedium)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                OutlinedTextField(
-                                    value = viewModel.lastScanPath,
-                                    onValueChange = { viewModel.updateLastScanPath(it) },
-                                    label = { Text("Directory Path") },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true
-                                )
-                                Button(onClick = { pickScanFolder.launch(null) }, enabled = !scanRunning) {
-                                    Text("Pick")
-                                }
-                            }
-                        }
-
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Game Library Folder", style = MaterialTheme.typography.labelMedium)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                OutlinedTextField(
-                                    value = viewModel.outputDirectory,
-                                    onValueChange = { viewModel.updateOutputDirectory(it) },
-                                    label = { Text("Directory Path") },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true
-                                )
-                                Button(onClick = { pickOutputFolder.launch(null) }, enabled = !libraryRunning) {
-                                    Text("Pick")
-                                }
-                            }
-                            Button(
-                                onClick = {
-                                    viewModel.updateOutputDirectory(context.getExternalFilesDir(null)?.absolutePath
-                                        ?: context.filesDir.absolutePath)
-                                },
-                                enabled = !libraryRunning,
-                            ) {
-                                Text("Reset to App Dir")
-                            }
-                        }
-
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Library Merge", style = MaterialTheme.typography.labelMedium)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = viewModel.deleteSourcesAfterMerge,
-                                    onCheckedChange = { viewModel.updateDeleteSourcesAfterMerge(it) },
-                                    enabled = !mergeRunning
-                                )
-                                Text("Delete source files after successful merge")
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = viewModel.ignoreXciInLibraryMerge,
-                                    onCheckedChange = { viewModel.updateIgnoreXciInLibraryMerge(it) },
-                                    enabled = !mergeRunning
-                                )
-                                Text("Ignore XCI/XCZ files")
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = viewModel.analyzePackageBeforeImport,
-                                    onCheckedChange = { viewModel.updateAnalyzePackageBeforeImport(it) },
-                                    enabled = !mergeRunning && !scanRunning && !libraryRunning
-                                )
-                                Text("Analyze package before import")
-                            }
-                        }
-
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("TitlesDB", style = MaterialTheme.typography.labelMedium)
-                            Button(
-                                onClick = {
-                                    scope.launch {
-                                        settingsRunning = true
-                                        startLogPolling()
-                                        progressStatus = "Updating TitlesDB..."
-                                        val result = withContext(Dispatchers.IO) { NscbBridge.refreshTitleDb(titleDbCacheDir) }
-                                        output = result
-                                        progressStatus = "Idle"
-                                        settingsRunning = false
+                        ScreenIntroCard(
+                            title = "Settings",
+                            subtitle = "Every field is labeled and explained so the page acts like a compact control panel instead of a raw preference dump.",
+                            accent = MaterialTheme.colorScheme.secondary
+                        )
+                        TwoColumnLayout(
+                            left = {
+                                SectionCard(
+                                    title = "Keys + folders",
+                                    description = "These paths drive every file workflow in the app. Keep them valid and persistent whenever possible.",
+                                    accent = MaterialTheme.colorScheme.secondary
+                                ) {
+                                    OutlinedTextField(
+                                        value = viewModel.keysPath,
+                                        onValueChange = { viewModel.updateKeysPath(it) },
+                                        label = { Text("prod.keys local path") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+                                    FieldHint("Point this at a readable prod.keys file. Most metadata and merge actions require it.")
+                                    Button(onClick = { pickKeys.launch(arrayOf("*/*")) }, enabled = !settingsRunning, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Pick prod.keys")
                                     }
-                                },
-                                enabled = !settingsRunning
-                            ) {
-                                Text("Refresh TitlesDB")
+
+                                    OutlinedTextField(
+                                        value = viewModel.lastScanPath,
+                                        onValueChange = { viewModel.updateLastScanPath(it) },
+                                        label = { Text("Import folder path") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+                                    FieldHint("This is the folder where new packages come from when you bulk import or load the import folder into Merge.")
+                                    Button(onClick = { pickScanFolder.launch(null) }, enabled = !scanRunning, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Pick import folder")
+                                    }
+
+                                    OutlinedTextField(
+                                        value = viewModel.outputDirectory,
+                                        onValueChange = { viewModel.updateOutputDirectory(it) },
+                                        label = { Text("Output library path") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+                                    FieldHint("This folder receives merged output, feeds the scanner page, and populates the library viewer.")
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(onClick = { pickOutputFolder.launch(null) }, enabled = !libraryRunning, modifier = Modifier.weight(1f)) {
+                                            Text("Pick output folder")
+                                        }
+                                        Button(
+                                            onClick = {
+                                                viewModel.updateOutputDirectory(context.getExternalFilesDir(null)?.absolutePath
+                                                    ?: context.filesDir.absolutePath)
+                                            },
+                                            enabled = !libraryRunning,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Reset to App Dir")
+                                        }
+                                    }
+                                    FieldHint("Reset to App Dir restores the app-private fallback path if you want a known-good writable location.")
+                                }
+                            },
+                            right = {
+                                SectionCard(
+                                    title = "Automation rules",
+                                    description = "These toggles change how imports, merges, and cleanup behave. Each one explains the trade-off so you can keep the page self-documenting.",
+                                    accent = MaterialTheme.colorScheme.primary
+                                ) {
+                                    OptionCard(
+                                        title = "Delete source files after successful merge",
+                                        description = "Enable this when the import folder should be treated as a staging queue that gets cleaned automatically after a good merge.",
+                                        checked = viewModel.deleteSourcesAfterMerge,
+                                        enabled = !mergeRunning,
+                                        onCheckedChange = { viewModel.updateDeleteSourcesAfterMerge(it) }
+                                    )
+                                    OptionCard(
+                                        title = "Ignore XCI / XCZ files during library merge",
+                                        description = "Enable this when your library cleanup should focus on NSP-style content and skip cart-style containers.",
+                                        checked = viewModel.ignoreXciInLibraryMerge,
+                                        enabled = !mergeRunning,
+                                        onCheckedChange = { viewModel.updateIgnoreXciInLibraryMerge(it) }
+                                    )
+                                    OptionCard(
+                                        title = "Analyze package before import",
+                                        description = "Keep this on when you want the app to inspect structure, detect faults, and derive a better output name before moving a file into the library.",
+                                        checked = viewModel.analyzePackageBeforeImport,
+                                        enabled = !mergeRunning && !scanRunning && !libraryRunning,
+                                        onCheckedChange = { viewModel.updateAnalyzePackageBeforeImport(it) }
+                                    )
+                                }
+                                SectionCard(
+                                    title = "Maintenance",
+                                    description = "This section keeps the local metadata cache fresh and reminds you how SAF-backed folder access behaves on Android.",
+                                    accent = MaterialTheme.colorScheme.tertiary
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                settingsRunning = true
+                                                startLogPolling()
+                                                progressStatus = "Updating TitlesDB..."
+                                                val ok = ensureTitlesDbReady("manual refresh", forceRefresh = true)
+                                                output = if (ok) "TitlesDB refreshed." else output
+                                                progressStatus = "Idle"
+                                                settingsRunning = false
+                                            }
+                                        },
+                                        enabled = !settingsRunning,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Refresh TitlesDB")
+                                    }
+                                    FieldHint("Refresh TitlesDB updates the cached metadata used for artwork, title names, publishers, release dates, and version checks.")
+                                    Text(
+                                        "Folder access uses SAF pickers. Internal storage usually persists across restarts, while USB or SD card access often needs to be re-picked each session.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
-                        }
-                        
-                        Text(
-                            "Folder access uses SAF pickers. Keep the app on folders you selected in the picker.",
-                            style = MaterialTheme.typography.labelSmall
                         )
                     }
                 }
@@ -3493,41 +4164,209 @@ fun RemoteArtwork(url: String?, fallbackText: String) {
 }
 
 @Composable
+fun LibraryHeroArtwork(file: LibraryFile) {
+    val heroUrl = file.imageUrl ?: file.details.firstOrNull()?.imageUrl ?: file.details.firstOrNull()?.screenshotUrls?.firstOrNull()
+    var bitmap by remember(heroUrl) { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(heroUrl) {
+        bitmap = null
+        if (!heroUrl.isNullOrBlank()) {
+            bitmap = withContext(Dispatchers.IO) {
+                runCatching {
+                    URL(heroUrl).openStream().use { input ->
+                        BitmapFactory.decodeStream(input)
+                    }
+                }.getOrNull()
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(112.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        val image = bitmap
+        if (image != null) {
+            Image(
+                bitmap = image.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(12.dp),
+                contentAlignment = Alignment.BottomStart
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = libraryDisplayTitle(file),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (file.imageUrl == null) "No artwork yet" else "Loading artwork…",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0x33000000))
+        )
+    }
+}
+
+@Composable
+fun StatusPill(text: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(color.copy(alpha = 0.18f))
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    ) {
+        Text(text = text, color = color, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+fun libraryDisplayTitle(file: LibraryFile): String {
+    return file.details.firstOrNull()?.titleName
+        ?.takeIf { it.isNotBlank() }
+        ?: file.titleSummary.lineSequence().firstOrNull()?.substringBefore(" [")?.takeIf { it.isNotBlank() }
+        ?: file.filename.substringBeforeLast('.')
+}
+
+fun libraryVersionDisplay(file: LibraryFile): String {
+    val detail = file.details.firstOrNull()
+    val localVersion = detail?.localVersion ?: run {
+        val stem = File(file.filename).nameWithoutExtension
+        val bracket = Regex("\\[v(\\d+)\\]").find(stem)
+        when {
+            bracket != null -> bracket.groupValues[1].toLongOrNull() ?: 0
+            else -> Regex("--v(\\d+)-").find(stem)?.groupValues?.get(1)?.toLongOrNull() ?: 0
+        }
+    }
+    val latestVersion = detail?.latestVersion
+    val localLabel = "v${localVersion / 65536}"
+    return if (latestVersion != null) {
+        val latestLabel = "v${latestVersion / 65536}"
+        if (latestVersion > localVersion) "$localLabel / latest $latestLabel" else "$localLabel / up to date"
+    } else {
+        localLabel
+    }
+}
+
+fun libraryCardTitleId(file: LibraryFile): String? {
+    return file.titleId
+        ?.takeIf { it.isNotBlank() }
+        ?: file.details.firstOrNull()?.titleId?.takeIf { it.isNotBlank() }
+        ?: run {
+            val re = Regex("[\\[-]([0-9A-Fa-f]{16})[\\]-]")
+            val stem = File(file.filename).nameWithoutExtension
+            val normalized = re.find(stem)?.groupValues?.get(1)?.trim()?.uppercase()?.takeIf { it.length == 16 }
+            when {
+                normalized == null -> null
+                normalized.endsWith("000") -> normalized
+                normalized.endsWith("800") -> normalized.dropLast(3) + "000"
+                else -> {
+                    val chars = normalized.toCharArray()
+                    val nibble = chars[12].digitToIntOrNull(16) ?: return@run normalized
+                    val adjusted = if (nibble > 0) nibble - 1 else 0
+                    chars[12] = adjusted.toString(16).uppercase()[0]
+                    chars[13] = '0'
+                    chars[14] = '0'
+                    chars[15] = '0'
+                    String(chars)
+                }
+            }
+        }
+}
+
+@Composable
 fun LibraryFileCard(
     file: LibraryFile,
     formatSize: (Long) -> String,
     formatModified: (Long) -> String,
-    onDeleteRequest: (String) -> Unit
+    onDeleteRequest: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
+    val title = libraryDisplayTitle(file)
+    val titleId = libraryCardTitleId(file)
+    val versionText = libraryVersionDisplay(file)
+    val versionColor = when (file.versionStatus) {
+        "outdated" -> MaterialTheme.colorScheme.error
+        "current" -> Color(0xFF2DD4BF)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            RemoteArtwork(file.imageUrl, file.extension)
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(file.filename, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 2)
-                Text("${formatSize(file.size)} • ${formatModified(file.modified)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(file.titleSummary, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, maxLines = 3)
-                if (file.versionSummary.isNotBlank()) {
-                    val statusColor = when (file.versionStatus) {
-                        "outdated" -> MaterialTheme.colorScheme.error
-                        "current" -> Color(0xFF2E7D32)
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                    Text(file.versionSummary, style = MaterialTheme.typography.labelSmall, color = statusColor, maxLines = 3)
-                }
-                if (file.imageUrl == null) {
-                    Text("Artwork: no TitlesDB match", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LibraryHeroArtwork(file)
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!titleId.isNullOrBlank()) {
+                    Text(
+                        text = titleId,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
-            IconButton(onClick = { onDeleteRequest(file.path) }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(
+                    text = versionText,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = versionColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = formatSize(file.size),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
             }
         }
     }
@@ -3545,84 +4384,105 @@ fun ScanGroupCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(group.titleName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(group.titleName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    LabeledValue(
+                        label = "Base title id",
+                        value = group.baseId,
+                        explanation = "All files in this card roll up into the same base title group.",
+                        monospace = true
+                    )
+                }
                 if (group.latestVersionDb > 0) {
                     val currentMax = group.items.maxOfOrNull { it.version } ?: 0
                     val isOutdated = group.latestVersionDb > currentMax
-                    Text(
-                        "DB: v${group.latestVersionDb / 65536}", 
-                        style = MaterialTheme.typography.labelSmall, 
-                        color = if (isOutdated) Color.Red else Color(0xFF2E7D32),
-                        fontWeight = FontWeight.Bold
+                    LabeledValue(
+                        label = "Latest DB version",
+                        value = "v${group.latestVersionDb / 65536}",
+                        explanation = if (isOutdated) "A newer version exists than the newest file currently present in this group." else "The newest file in this group already matches the TitlesDB version.",
+                        valueColor = if (isOutdated) MaterialTheme.colorScheme.error else Color(0xFF2DD4BF)
                     )
                 }
             }
-            Text("Base ID: ${group.baseId}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-            
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Group by full Title ID. Multiple entries here are likely duplicates or different versions.
+
+            FieldHint("Rows are grouped by full title ID. Older versions and exact duplicates are highlighted so you can remove clutter before merging.")
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 val groupedById = group.items.groupBy { it.titleId }
-                
+
                 groupedById.forEach { (tid, items) ->
-                    // Sort items by version descending
                     val sortedItems = items.sortedByDescending { it.version }
                     val latest = sortedItems.first()
-                    
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp)
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             val typeLabel = when {
                                 tid.endsWith("000") -> "Base"
                                 tid.endsWith("800") -> "Update"
                                 else -> "DLC"
                             }
-                            Text("$typeLabel: v${latest.version / 65536}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                            Text(tid.takeLast(4), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                        }
-                        
-                        sortedItems.forEachIndexed { index, item ->
-                            val isOlderVersion = index > 0
-                            val isExactDupe = sortedItems.any { it !== item && it.version == item.version }
-                            
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(
-                                        if (isExactDupe || isOlderVersion) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
-                                        else Color.Transparent,
-                                        RoundedCornerShape(4.dp)
-                                    )
-                                    .padding(start = 8.dp, top = 2.dp, bottom = 2.dp, end = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = item.filename,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (isExactDupe || isOlderVersion) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                        fontFamily = FontFamily.Monospace,
-                                        maxLines = 1
-                                    )
-                                    if (isOlderVersion) {
-                                        Text("OLDER VERSION", style = MaterialTheme.typography.labelSmall, color = Color.Red, fontWeight = FontWeight.Bold)
-                                    } else if (isExactDupe) {
-                                        Text("DUPLICATE", style = MaterialTheme.typography.labelSmall, color = Color.Red, fontWeight = FontWeight.Bold)
-                                    }
+                            LabeledValue(
+                                label = "$typeLabel title id",
+                                value = "$tid • latest local v${latest.version / 65536}",
+                                explanation = "This subsection groups files that share the exact same full title ID.",
+                                monospace = true
+                            )
+
+                            sortedItems.forEachIndexed { index, item ->
+                                val isOlderVersion = index > 0
+                                val isExactDupe = sortedItems.any { it !== item && it.version == item.version }
+                                val badge = when {
+                                    isOlderVersion -> "OLDER VERSION"
+                                    isExactDupe -> "DUPLICATE"
+                                    else -> "KEEP"
                                 }
-                                IconButton(onClick = { onDeleteRequest(item.path) }, modifier = Modifier.size(24.dp)) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            if (isExactDupe || isOlderVersion) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.22f)
+                                            else MaterialTheme.colorScheme.surface,
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(
+                                            text = item.filename,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isExactDupe || isOlderVersion) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                            fontFamily = FontFamily.Monospace,
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = "$typeLabel • version ${item.version / 65536} • $badge",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isExactDupe || isOlderVersion) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        FieldHint("Delete removes only this one package entry from the scan group.")
+                                    }
+                                    IconButton(onClick = { onDeleteRequest(item.path) }, modifier = Modifier.size(24.dp)) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            
+
             if (group.items.isNotEmpty()) {
                 Row(
                     modifier = Modifier.align(Alignment.End),

@@ -35,7 +35,7 @@ fn require_keys(keys_path: &str) -> Result<KeyStore, String> {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_configureTempRoot(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_configureTempRoot(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     temp_root: JString<'_>,
@@ -75,7 +75,7 @@ fn format_release_date(value: u64) -> String {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_merge(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_merge(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     inputs_joined: JString<'_>,
@@ -131,7 +131,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_merge(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_compress(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_compress(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     input_path: JString<'_>,
@@ -163,7 +163,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_compress(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_decompress(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_decompress(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     input_path: JString<'_>,
@@ -371,7 +371,7 @@ fn validate_container_bounds(path: &Path, ks: &KeyStore) -> Result<(), String> {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_renamePath(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_renamePath(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     path: JString<'_>,
@@ -418,7 +418,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_renamePath(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_scanDirectory(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_scanDirectory(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     path: JString<'_>,
@@ -529,7 +529,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_scanDirectory(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_scanFaultyFiles(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_scanFaultyFiles(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     path: JString<'_>,
@@ -588,7 +588,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_scanFaultyFiles(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_refreshTitleDb(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_refreshTitleDb(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     cache_dir: JString<'_>,
@@ -622,7 +622,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_refreshTitleDb(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_libraryStatus(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_libraryStatus(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     input_path: JString<'_>,
@@ -772,7 +772,7 @@ struct BatchLookupResponse {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_extractFileTitle(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_extractFileTitle(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     file_name: JString<'_>,
@@ -819,7 +819,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_extractFileTitle(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_titleDbLookupBatch(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_titleDbLookupBatch(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     ids_joined: JString<'_>,
@@ -880,7 +880,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_titleDbLookupBatch(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_getLogs(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_getLogs(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -888,7 +888,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_getLogs(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_deleteFile(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_deleteFile(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     path: JString<'_>,
@@ -912,7 +912,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_deleteFile(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_contentList(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_contentList(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     input_path: JString<'_>,
@@ -933,7 +933,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_contentList(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_fileList(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_fileList(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     input_path: JString<'_>,
@@ -954,7 +954,7 @@ pub extern "system" fn Java_com_nscb_android_NscbBridge_fileList(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_nscb_android_NscbBridge_getSuggestedFileName(
+pub extern "system" fn Java_com_simplikfiwed_librarymanager_NscbBridge_getSuggestedFileName(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     inputs_joined: JString<'_>,
